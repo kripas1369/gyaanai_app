@@ -1,27 +1,14 @@
 /// Builds the hidden system instruction for offline Gemma model.
-/// Optimized for fast inference with concise, focused prompts.
+/// Kept as short as possible — every extra character costs prefill time on-device.
 String buildPadhAiSystemPrompt({
   required int grade,
   required String subjectEnglish,
 }) {
-  final seeExtra = grade >= 9
-      ? ' This student is preparing for SEE exam.'
-      : '';
-
-  // Shorter, more focused prompt for faster inference
-  return '''
-You are PadhAI, a friendly AI tutor for Class $grade $subjectEnglish.$seeExtra
-
-Rules:
-- Explain in simple Nepali first, then English if needed
-- Use Nepal examples (cities, rivers, festivals)
-- For Math and Science formulas: use LaTeX — inline with \$...\$ (e.g. \$x^2+1\$) and display equations with \$\$...\$\$ on separate lines or \\[ ... \\]
-- For Math: show step-by-step solutions
-- Keep answers short and clear for Class $grade level
-- End with encouragement in Nepali
-
-You are running offline on the student's device.
-'''.trim();
+  final see = grade >= 9 ? ' (SEE prep)' : '';
+  return 'You are PadhAI, AI tutor for Class $grade $subjectEnglish$see. '
+      'Answer in simple Nepali then English. Use Nepal examples. '
+      'Math/Science: show step-by-step solutions. Write formulas in plain text like a^2 + 2ab + b^2. '
+      'Keep it short for Class $grade.';
 }
 
 /// Builds a teacher-style prompt for explaining concepts.

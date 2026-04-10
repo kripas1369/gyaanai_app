@@ -44,7 +44,12 @@ class HybridAiService {
 
   bool _isOnline = false;
   DateTime? _lastConnectivityCheck;
+  /// After a fast connection failure, skip hammering an unreachable host.
+  DateTime? _negativeCacheUntil;
+
   static const _connectivityCacheDuration = Duration(seconds: 30);
+  static const _healthCheckTimeout = Duration(milliseconds: 900);
+  static const _negativeCacheAfterFailure = Duration(seconds: 90);
 
   /// The base URL used for all Django HTTP calls (already Android-rewritten).
   String get _baseUrl => settings.effectiveDjangoBaseUrl;
@@ -71,19 +76,25 @@ class HybridAiService {
 
   /// Check if Django + Ollama AI is reachable (`/api/ai/health/` returns 200).
   Future<bool> _checkOnlineStatus() async {
+    final now = DateTime.now();
+    if (_negativeCacheUntil != null && now.isBefore(_negativeCacheUntil!)) {
+      return false;
+    }
+
     if (_lastConnectivityCheck != null) {
-      final elapsed = DateTime.now().difference(_lastConnectivityCheck!);
+      final elapsed = now.difference(_lastConnectivityCheck!);
       if (elapsed < _connectivityCacheDuration) return _isOnline;
     }
 
     try {
       final uri = Uri.parse('$_baseUrl/api/ai/health/');
       final response = await http.get(uri).timeout(
-        const Duration(seconds: 3),
+        _healthCheckTimeout,
         onTimeout: () => http.Response('timeout', 408),
       );
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        _negativeCacheUntil = null;
         // Double-check the body: Ollama may be reachable but the
         // configured model might not be pulled yet.
         try {
@@ -98,6 +109,13 @@ class HybridAiService {
     } catch (e) {
       debugPrint('HybridAiService: Online check failed: $e');
       _isOnline = false;
+      final msg = e.toString();
+      if (msg.contains('SocketException') ||
+          msg.contains('Connection refused') ||
+          msg.contains('Failed host lookup')) {
+        _negativeCacheUntil =
+            DateTime.now().add(_negativeCacheAfterFailure);
+      }
     }
 
     _lastConnectivityCheck = DateTime.now();
@@ -107,6 +125,7 @@ class HybridAiService {
   /// Force refresh connectivity status.
   Future<AiMode> refreshConnectivity() async {
     _lastConnectivityCheck = null;
+    _negativeCacheUntil = null;
     return getCurrentMode();
   }
 

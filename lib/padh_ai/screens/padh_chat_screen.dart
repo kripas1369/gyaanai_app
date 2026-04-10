@@ -84,14 +84,19 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
     _scrollToBottom();
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool jump = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        _scroll.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
+      final max = _scroll.position.maxScrollExtent;
+      if (jump) {
+        _scroll.jumpTo(max);
+      } else {
+        _scroll.animateTo(
+          max,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -137,15 +142,11 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
       });
       _scrollToBottom();
 
-      // Check current AI mode
-      final mode = await hybridAi.getCurrentMode();
-      if (mounted) {
-        setState(() {
-          _currentMode = mode;
-        });
-      }
-
       var fullAnswer = '';
+      var lastUiAt = DateTime.fromMillisecondsSinceEpoch(0);
+      var lastPainted = '';
+      const streamUiInterval = Duration(milliseconds: 60);
+
       // Use hybrid AI service - automatically chooses online or offline
       await for (final assembled in hybridAi.runInferenceStreaming(
         grade: widget.grade,
@@ -155,6 +156,10 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
       )) {
         fullAnswer = assembled;
         if (!mounted) return;
+        final now = DateTime.now();
+        if (now.difference(lastUiAt) < streamUiInterval) continue;
+        lastUiAt = now;
+        lastPainted = assembled;
         setState(() {
           _streamingAssistant = true;
           _lines = [
@@ -168,7 +173,23 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
             ),
           ];
         });
-        _scrollToBottom();
+        _scrollToBottom(jump: true);
+      }
+      if (mounted && fullAnswer != lastPainted) {
+        setState(() {
+          _streamingAssistant = true;
+          _lines = [
+            ...rows.map(_ChatLine.fromDb),
+            _ChatLine(
+              dbId: null,
+              role: 'assistant',
+              content: fullAnswer,
+              createdAt: DateTime.now(),
+              streaming: true,
+            ),
+          ];
+        });
+        _scrollToBottom(jump: true);
       }
 
       await repo.insertAssistantMessage(widget.sessionId, fullAnswer);
@@ -377,69 +398,46 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
                                 const SizedBox(width: 8),
                               ],
                               Flexible(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: isUser
-                                        ? PadhAiColors.bubbleUser
-                                        : PadhAiColors.bubbleAi,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: isUser
-                                        ? null
-                                        : Border.all(
-                                            color: Colors.black.withValues(alpha: 0.06),
-                                          ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.05),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 3),
-                                      ),
-                                    ],
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12),
-                                    child: isUser
-                                        ? Text(
-                                            line.content,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodyMedium
-                                                ?.copyWith(color: PadhAiColors.textPrimary),
-                                          )
-                                        : MarkdownBody(
-                                            data: line.content,
-                                            selectable: true,
-                                            builders: {
-                                              'latex': LatexElementBuilder(
-                                                textStyle: Theme.of(context)
-                                                    .textTheme
-                                                    .bodyMedium
-                                                    ?.copyWith(
-                                                      color: PadhAiColors.textPrimary,
-                                                    ),
-                                                textScaleFactor: 1.05,
-                                              ),
-                                            },
-                                            extensionSet: md.ExtensionSet(
-                                              [
-                                                LatexBlockSyntax(),
-                                                ...md.ExtensionSet.gitHubFlavored.blockSyntaxes,
-                                              ],
-                                              [
-                                                LatexInlineSyntax(),
-                                                ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes,
-                                              ],
+                                child: RepaintBoundary(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: isUser
+                                          ? PadhAiColors.bubbleUser
+                                          : PadhAiColors.bubbleAi,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: isUser
+                                          ? null
+                                          : Border.all(
+                                              color: Colors.black.withValues(alpha: 0.06),
                                             ),
-                                            styleSheet: MarkdownStyleSheet(
-                                              p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.05),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 3),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: isUser
+                                          ? Text(
+                                              line.content,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(color: PadhAiColors.textPrimary),
+                                            )
+                                          : _SafeMarkdown(
+                                              data: line.content,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
                                                     color: PadhAiColors.textPrimary,
                                                   ),
-                                              code: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                                    fontFamily: 'monospace',
-                                                    backgroundColor: Colors.grey.shade200,
-                                                  ),
                                             ),
-                                          ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -635,6 +633,71 @@ class _BouncingDotsState extends State<_BouncingDots>
           }),
         );
       },
+    );
+  }
+}
+
+/// Renders markdown with LaTeX when `$`-delimited expressions look well-formed,
+/// otherwise strips `$` signs and renders plain markdown — avoids "Parse Error".
+class _SafeMarkdown extends StatelessWidget {
+  const _SafeMarkdown({required this.data, this.style});
+
+  final String data;
+  final TextStyle? style;
+
+  /// True when every `$` has a matching close and the inner text is non-empty.
+  static bool _hasValidLatex(String s) {
+    if (!s.contains('\$')) return false;
+    // Check $$...$$ blocks
+    final block = RegExp(r'\$\$(.+?)\$\$', dotAll: true);
+    // Check $...$ inline (not empty, not just whitespace)
+    final inline = RegExp(r'\$([^\$\s][^\$]*?)\$');
+    return block.hasMatch(s) || inline.hasMatch(s);
+  }
+
+  /// Remove all `$` characters so the markdown parser doesn't choke.
+  static String _stripDollars(String s) {
+    var out = s.replaceAllMapped(
+      RegExp(r'\$\$(.+?)\$\$', dotAll: true),
+      (m) => m.group(1) ?? '',
+    );
+    out = out.replaceAllMapped(
+      RegExp(r'\$(.+?)\$'),
+      (m) => m.group(1) ?? '',
+    );
+    // Catch any remaining lone $ signs
+    return out.replaceAll('\$', '');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final useLatex = _hasValidLatex(data);
+    final display = useLatex ? data : _stripDollars(data);
+
+    return MarkdownBody(
+      data: display,
+      selectable: true,
+      builders: useLatex
+          ? {
+              'latex': LatexElementBuilder(
+                textStyle: style,
+                textScaleFactor: 1.05,
+              ),
+            }
+          : {},
+      extensionSet: useLatex
+          ? md.ExtensionSet(
+              [LatexBlockSyntax(), ...md.ExtensionSet.gitHubFlavored.blockSyntaxes],
+              [LatexInlineSyntax(), ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes],
+            )
+          : md.ExtensionSet.gitHubFlavored,
+      styleSheet: MarkdownStyleSheet(
+        p: style,
+        code: style?.copyWith(
+          fontFamily: 'monospace',
+          backgroundColor: Colors.grey.shade200,
+        ),
+      ),
     );
   }
 }

@@ -59,9 +59,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         return;
       }
 
-      // Model found → try to load it
+      // Model found → load LiteRT only (skip full warm-up generation — that can take
+      // many minutes on Android and looked like a frozen splash; first chat validates).
       setState(() => _loadingStatus = 'Loading AI model...');
-      final success = await gemma.initialize();
+      final success = await gemma.initialize(skipWarmup: true);
 
       await minSplashFuture;
 

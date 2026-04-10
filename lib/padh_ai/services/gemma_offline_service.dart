@@ -130,22 +130,16 @@ String _buildOfflineInferencePrompt({
 }) {
   var system = systemPrompt ??
       buildPadhAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
-  if (system.length > 1200) {
-    system = '${system.substring(0, 1200)}\n…';
+  if (system.length > 600) {
+    system = system.substring(0, 600);
   }
   var user = userMessage.trim();
-  if (user.length > 2000) {
-    user = '${user.substring(0, 2000)}\n…';
+  if (user.length > 1000) {
+    user = '${user.substring(0, 1000)}…';
   }
-  var prompt = '''$system
-
-Student (Class $grade, $subjectEnglish):
-$user
-
-Teacher:''';
+  var prompt = '$system\n\nStudent: $user\n\nTeacher:';
   if (prompt.length > maxChars) {
-    prompt =
-        '${prompt.substring(0, maxChars)}\n\n[Prompt shortened for on-device AI]';
+    prompt = prompt.substring(0, maxChars);
   }
   return prompt;
 }
@@ -172,27 +166,23 @@ List<PreferredBackend> _liteRtBackendsToTry({
 /// Offline Gemma 4 via [flutter_gemma] (LiteRT-LM / MediaPipe).
 /// Uses model file from device storage (not bundled in APK).
 class GemmaOfflineService {
-  /// KV / context budget. Too small breaks prefill; `flutter_gemma` caps LiteRT around 4k.
-  static const int _maxTokens = 2048;
+  /// KV / context budget. Lower = faster prefill. 1024 is enough for short
+  /// system prompt + one student question + a ~256-token answer.
+  static const int _maxTokens = 1024;
 
-  /// Long enough to exercise the same prefill path as real chat (short "hi" can pass while real prompts fail).
-  static const String _warmupPrompt = r'''
-You are PadhAI, a friendly AI tutor for Class 10 Mathematics. This student is preparing for SEE exam.
+  /// Short warm-up that exercises prefill without wasting time on a full answer.
+  static const String _warmupPrompt =
+      'You are PadhAI tutor.\n\nStudent: hello\n\nTeacher:';
 
-Rules:
-- Explain in simple Nepali first, then English if needed
-- Use Nepal examples (cities, rivers, festivals)
-- Keep answers short and clear for Class 10 level
+  /// Lower topK = fewer candidates per step = faster sampling on-device.
+  static const int _defaultTopK = 20;
 
-Student (Class 10, Mathematics):
-hello
+  /// Slightly lower temperature for more focused (and fewer wasted) tokens.
+  static const double _defaultTemperature = 0.6;
 
-Teacher:
-''';
-
-  static const int _defaultTopK = 40;
-  static const double _defaultTemperature = 0.7;
-  static const int _maxPromptChars = 3200;
+  /// Shorter prompts = less prefill compute. 2000 chars is plenty for
+  /// system (≈400) + user question + formatting overhead.
+  static const int _maxPromptChars = 2000;
 
   InferenceModel? _model;
   var _status = GemmaModelStatus.notFound;
@@ -231,9 +221,13 @@ Teacher:
   /// Set [forceReload] to drop the native session after errors (e.g. LiteRT status 13).
   /// Set [tryOtherBackendFirst] to try the other backend(s) before the last one that worked
   /// (used after inference failures on the current backend).
+  ///
+  /// Set [skipWarmup] to load LiteRT without running a full preflight generation (splash screen).
+  /// First real chat still validates the session; [runInferenceAccumulating] can retry backends.
   Future<bool> initialize({
     bool forceReload = false,
     bool tryOtherBackendFirst = false,
+    bool skipWarmup = false,
   }) async {
     if (!forceReload && _model != null) return true;
 
@@ -279,19 +273,27 @@ Teacher:
             preferredBackend: backend,
           );
 
-          debugPrint('GemmaService: Preflight warm-up (long prompt)...');
-          final warmChat = await _model!.createChat();
-          await warmChat.addQueryChunk(
-            Message.text(text: _warmupPrompt, isUser: true),
-          );
-          final warmResp = await warmChat.generateChatResponse();
-          final text = warmResp is TextResponse ? warmResp.token.trim() : '';
-          if (text.isEmpty) {
-            throw StateError('Warm-up returned empty text (same failure mode as chat).');
+          if (!skipWarmup) {
+            debugPrint('GemmaService: Preflight warm-up (long prompt)...');
+            final warmChat = await _model!.createChat();
+            await warmChat.addQueryChunk(
+              Message.text(text: _warmupPrompt, isUser: true),
+            );
+            final warmResp = await warmChat.generateChatResponse();
+            final text = warmResp is TextResponse ? warmResp.token.trim() : '';
+            if (text.isEmpty) {
+              throw StateError('Warm-up returned empty text (same failure mode as chat).');
+            }
+            debugPrint(
+              'GemmaService: Model ready on $backend (warm-up ok, ${text.length} chars).',
+            );
+          } else {
+            debugPrint(
+              'GemmaService: Model loaded on $backend (warm-up skipped for fast startup).',
+            );
           }
 
           _lastBackendUsed = backend;
-          debugPrint('GemmaService: Model ready on $backend (warm-up ok, ${text.length} chars).');
           _status = GemmaModelStatus.ready;
           _statusController.add(_status);
           return true;
@@ -319,10 +321,8 @@ Teacher:
     await initialize();
   }
 
-  /// Warm up (already done in initialize)
-  Future<void> warmUp() async {
-    // Already warmed up in initialize()
-  }
+  /// Optional no-op; preflight warm-up runs in [initialize] unless [skipWarmup] was true.
+  Future<void> warmUp() async {}
 
   void dispose() {
     unawaited(_releaseModelInstance());
@@ -369,7 +369,7 @@ Teacher:
       maxChars: _maxPromptChars,
     );
 
-    final outCap = maxOutputTokens ?? 384;
+    final outCap = maxOutputTokens ?? 256;
 
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
@@ -380,6 +380,8 @@ Teacher:
           return;
         }
 
+        final sw = Stopwatch()..start();
+
         final chat = await _model!.createChat(
           topK: _defaultTopK,
           temperature: _defaultTemperature,
@@ -388,20 +390,36 @@ Teacher:
         );
 
         await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
+        debugPrint('GemmaService: prefill took ${sw.elapsedMilliseconds}ms');
 
         var acc = '';
         var tokenCount = 0;
+        var lastYieldAt = DateTime.fromMillisecondsSinceEpoch(0);
+        var lastEmitted = '';
+        const yieldMinInterval = Duration(milliseconds: 50);
 
         await for (final response in chat.generateChatResponseAsync()) {
           if (response is TextResponse) {
             acc += response.token;
             tokenCount++;
-            if (response.token.isNotEmpty) {
+            if (response.token.isEmpty) continue;
+            final t = DateTime.now();
+            if (t.difference(lastYieldAt) >= yieldMinInterval ||
+                tokenCount >= outCap) {
+              lastYieldAt = t;
+              lastEmitted = acc;
               yield acc;
             }
             if (tokenCount >= outCap) break;
           }
         }
+        if (acc != lastEmitted) {
+          yield acc;
+        }
+
+        final elapsed = sw.elapsedMilliseconds;
+        final tps = elapsed > 0 ? (tokenCount * 1000 / elapsed).toStringAsFixed(1) : '?';
+        debugPrint('GemmaService: $tokenCount tokens in ${elapsed}ms ($tps tok/s)');
 
         if (acc.trim().isEmpty) {
           debugPrint(
