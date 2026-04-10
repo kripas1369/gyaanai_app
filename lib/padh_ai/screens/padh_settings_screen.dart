@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../../data/services/app_settings_service.dart';
 import '../providers/padh_ai_providers.dart';
 import '../theme/padh_ai_theme.dart';
 
@@ -50,7 +51,8 @@ class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
       _testing = true;
       _testResult = null;
     });
-    final base = _djangoCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
+    final raw = _djangoCtrl.text.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = AppSettingsService.rewriteLocalhostUrl(raw);
     final uri = Uri.parse('$base/api/health/');
     try {
       final r = await http.get(uri).timeout(const Duration(seconds: 5));

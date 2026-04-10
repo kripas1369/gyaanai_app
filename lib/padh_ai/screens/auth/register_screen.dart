@@ -6,6 +6,7 @@ import '../../navigation/slide_route.dart';
 import '../../providers/padh_ai_providers.dart';
 import '../../theme/padh_ai_theme.dart';
 import '../grade_selection_screen.dart';
+import '../padh_settings_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -44,8 +45,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       _errorMessage = null;
     });
     try {
-      final settings = ref.read(appSettingsProvider);
-      final api = ApiService(settings);
+      final api = ref.read(apiServiceProvider);
       await api.registerStudent(
         username: _usernameCtrl.text.trim(),
         password: _passwordCtrl.text,
@@ -292,7 +292,17 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                           ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _isLoading
+                      ? null
+                      : () => Navigator.of(context).push(
+                            slideFromRight(const PadhSettingsScreen()),
+                          ),
+                  icon: const Icon(Icons.dns_outlined, size: 18),
+                  label: const Text('Server settings'),
+                ),
+                const SizedBox(height: 8),
 
                 // Back to login
                 Row(

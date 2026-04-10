@@ -40,7 +40,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final settings = ref.read(appSettingsProvider);
     final serverUrl = settings.djangoBaseUrl;
     try {
-      final api = ApiService(settings);
+      final api = ref.read(apiServiceProvider);
       await api.login(
         username: _usernameCtrl.text.trim(),
         password: _passwordCtrl.text,
