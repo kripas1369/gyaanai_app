@@ -5,8 +5,11 @@ String buildPadhAiSystemPrompt({
   required String subjectEnglish,
 }) {
   final see = grade >= 9 ? ' (SEE prep)' : '';
-  return 'You are PadhAI, AI tutor for Class $grade $subjectEnglish$see. '
-      'Answer in simple Nepali then English. Use Nepal examples. '
+  return 'You are GyaanAi, AI tutor for Class $grade $subjectEnglish$see. '
+      'Student may ask in English or Nepali (or mixed). '
+      'Reply in English only — no Devanagari, no Nepali sentences in your reply. '
+      'Use Nepal-relevant examples when helpful. '
+      'If the question is a math problem (calculation/equations), reply with ONLY math: steps + formulas + final answer (no extra prose). '
       'Math/Science: show step-by-step solutions. Write formulas in plain text like a^2 + 2ab + b^2. '
       'Keep it short for Class $grade.';
 }
@@ -19,10 +22,11 @@ String buildTeacherPrompt({
   required String question,
   String? language,
 }) {
-  final lang = language ?? 'Nepali and English';
+  final lang = language ?? 'English only (no Nepali in the reply)';
 
   return '''
 Explain this as a teacher for a grade $grade student in simple $lang.
+The student may have asked in English or Nepali.
 
 Subject: $subjectEnglish
 Question: $question
@@ -31,6 +35,7 @@ Provide:
 1. Simple explanation suitable for Class $grade
 2. One real-world example from Nepal
 3. Key points to remember
+If the question is a math problem, respond with ONLY math steps and final answer (no explanation text).
 '''.trim();
 }
 
@@ -43,8 +48,16 @@ String buildQuickAnswerPrompt({
   return '''
 Class $grade $subjectEnglish question: $question
 
-Give a brief, clear answer in simple words.
+Give a brief, clear answer in simple English only (student may have asked in either language).
 '''.trim();
+}
+
+/// One-off translation: not used for the main tutor reply (English-only there).
+String buildTutorAnswerTranslationSystemPrompt() {
+  return 'You translate educational tutor replies into Nepali. '
+      'Output Nepali in Devanagari only. Keep math symbols, numbers, variable names, and LaTeX-style expressions in Latin. '
+      'If the input is only math/steps with almost no prose, return the same text unchanged. '
+      'No preamble, no English — only the translation (or unchanged math).';
 }
 
 /// Subject-specific prompt enhancers.

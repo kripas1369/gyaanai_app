@@ -178,7 +178,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
   Widget build(BuildContext context) {
     return ScaffoldWithBanner(
       appBar: AppBar(
-        title: const Text('PadhAI'),
+        title: const Text('GyaanAi'),
         actions: [
           const PadhAccountMenuButton(),
           IconButton(

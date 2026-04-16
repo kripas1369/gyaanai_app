@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS messages (
     );
   }
 
-  // --- PadhAI chat (grade + subject tutoring) ---
+  // --- GyaanAi chat (grade + subject tutoring) ---
 
   Future<int> insertChatSession({
     required int grade,

@@ -64,7 +64,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Account created! Welcome to PadhAI.'),
+          content: Text('Account created! Welcome to GyaanAi.'),
           backgroundColor: PadhAiColors.secondary,
         ),
       );

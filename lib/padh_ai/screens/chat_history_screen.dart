@@ -120,7 +120,8 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'No chats yet. Tap + to start learning!',
+                      'No chats yet. Tap + to start learning!\n'
+                      'अझै कुनै च्याट छैन। + थिचेर सुरु गर्नुहोस्।',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: PadhAiColors.textSecondary,

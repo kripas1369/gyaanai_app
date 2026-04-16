@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AppSettingsService {
   static const _kOllamaHost = 'ollama_host';
 
-  /// Full Ollama API base for PadhAI, e.g. `http://192.168.1.5:11434` (no trailing slash).
+  /// Full Ollama API base for GyaanAi, e.g. `http://192.168.1.5:11434` (no trailing slash).
   static const _kPadhOllamaBaseUrl = 'padh_ollama_base_url';
   static const _kDjangoBaseUrl = 'django_base_url';
   static const _kAccessToken = 'jwt_access';
@@ -26,7 +26,7 @@ class AppSettingsService {
   Future<void> setOllamaHost(String v) =>
       _prefs.setString(_kOllamaHost, v.trim());
 
-  /// User override for PadhAI → Ollama. `null` or empty = use platform default.
+  /// User override for GyaanAi → Ollama. `null` or empty = use platform default.
   String? get padhOllamaBaseUrlOverride =>
       _prefs.getString(_kPadhOllamaBaseUrl);
 
@@ -57,7 +57,7 @@ class AppSettingsService {
   /// Raw URL as the user typed it (stored in prefs).
   /// Default to local network IP for physical device testing.
   String get djangoBaseUrl =>
-      _prefs.getString(_kDjangoBaseUrl) ?? 'http://192.168.1.69:8000';
+      _prefs.getString(_kDjangoBaseUrl) ?? 'http://192.168.1.191:8080';
   Future<void> setDjangoBaseUrl(String v) =>
       _prefs.setString(_kDjangoBaseUrl, v.trim());
 

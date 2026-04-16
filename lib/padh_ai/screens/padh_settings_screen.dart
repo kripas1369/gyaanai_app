@@ -6,7 +6,7 @@ import '../../data/services/app_settings_service.dart';
 import '../providers/padh_ai_providers.dart';
 import '../theme/padh_ai_theme.dart';
 
-/// PadhAI settings: Django API URL and Ollama host (Riverpod; no GetX).
+/// GyaanAi settings: Django API URL and Ollama host (Riverpod; no GetX).
 class PadhSettingsScreen extends ConsumerStatefulWidget {
   const PadhSettingsScreen({super.key});
 

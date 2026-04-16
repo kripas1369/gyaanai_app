@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_markdown_latex/flutter_markdown_latex.dart';
@@ -8,7 +10,7 @@ import 'package:intl/intl.dart';
 import '../data/subject_catalog.dart';
 import '../navigation/slide_route.dart';
 import '../providers/padh_ai_providers.dart';
-import '../services/hybrid_ai_service.dart';
+import '../services/hybrid_ai_service.dart'; // exports ChatHistoryMessage
 import '../services/padh_ai_system_prompt.dart';
 import '../theme/padh_ai_theme.dart';
 import '../widgets/padh_account_menu_button.dart';
@@ -30,6 +32,8 @@ class PadhChatScreen extends ConsumerStatefulWidget {
   ConsumerState<PadhChatScreen> createState() => _PadhChatScreenState();
 }
 
+enum _AnswerLang { english, nepali }
+
 class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
   final _scroll = ScrollController();
   final _input = TextEditingController();
@@ -39,6 +43,12 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
   var _streamingAssistant = false;
   List<_ChatLine> _lines = [];
   AiMode _currentMode = AiMode.offline;
+
+  /// Assistant bubbles: English from the model; Nepali is loaded on demand in the app.
+  _AnswerLang _answerLang = _AnswerLang.english;
+  final Map<int, String> _nepaliByMessageId = {};
+  final Set<int> _nepaliLoading = {};
+  final Set<int> _nepaliFailed = {};
 
   @override
   void initState() {
@@ -82,6 +92,7 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
       _lines = rows.map(_ChatLine.fromDb).toList();
     });
     _scrollToBottom();
+    _prefetchNepaliIfNeeded();
   }
 
   void _scrollToBottom({bool jump = false}) {
@@ -147,12 +158,22 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
       var lastPainted = '';
       const streamUiInterval = Duration(milliseconds: 60);
 
+      // Build conversation history for context-aware responses
+      final history = rows.map((row) => ChatHistoryMessage(
+        role: row['role'] as String,
+        content: row['content'] as String,
+        timestamp: DateTime.parse(row['created_at'] as String),
+      )).toList();
+
       // Use hybrid AI service - automatically chooses online or offline
+      // Now with session tracking and conversation history for context
       await for (final assembled in hybridAi.runInferenceStreaming(
         grade: widget.grade,
         subjectEnglish: widget.subject.english,
         userMessage: text,
         systemPrompt: system,
+        sessionId: widget.sessionId,
+        history: history,
       )) {
         fullAnswer = assembled;
         if (!mounted) return;
@@ -260,12 +281,158 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
     final repo = ref.read(padhChatRepoProvider);
     await repo.clearMessages(widget.sessionId);
     await repo.updateSessionTitle(widget.sessionId, 'New chat');
+    // Clear the Gemma conversation session cache for this chat
+    ref.read(gemmaOfflineProvider).clearSession(widget.sessionId);
     if (!mounted) return;
+    setState(() {
+      _nepaliByMessageId.clear();
+      _nepaliLoading.clear();
+      _nepaliFailed.clear();
+    });
     await _load();
   }
 
   void _goHistory() {
     Navigator.of(context).pop();
+  }
+
+  static const _kMaxTranslationChars = 10000;
+
+  String _trimForTranslation(String s) {
+    final t = s.trim();
+    if (t.length <= _kMaxTranslationChars) return t;
+    return '${t.substring(0, _kMaxTranslationChars)}\n\n[…truncated]';
+  }
+
+  void _prefetchNepaliIfNeeded() {
+    if (_answerLang != _AnswerLang.nepali) return;
+    for (final line in _lines) {
+      if (line.role == 'assistant' && line.dbId != null && !line.streaming) {
+        unawaited(_fetchNepaliIfNeeded(line));
+      }
+    }
+  }
+
+  Future<void> _fetchNepaliIfNeeded(_ChatLine line) async {
+    final id = line.dbId;
+    if (id == null || line.role != 'assistant' || line.streaming) return;
+    if (_nepaliByMessageId.containsKey(id) ||
+        _nepaliLoading.contains(id) ||
+        _nepaliFailed.contains(id)) {
+      return;
+    }
+    final source = line.content.trim();
+    if (source.isEmpty) return;
+
+    setState(() => _nepaliLoading.add(id));
+
+    final hybrid = ref.read(hybridAiProvider);
+    try {
+      final translated = await hybrid.runInference(
+        grade: widget.grade,
+        subjectEnglish: widget.subject.english,
+        systemPrompt: buildTutorAnswerTranslationSystemPrompt(),
+        userMessage:
+            'Translate the following tutor reply into Nepali (see system rules).\n\n---\n\n${_trimForTranslation(source)}',
+        sessionId: null,
+        history: null,
+      );
+      final out = translated.trim();
+      if (!mounted) return;
+      setState(() {
+        _nepaliLoading.remove(id);
+        if (out.isEmpty) {
+          _nepaliFailed.add(id);
+        } else {
+          _nepaliByMessageId[id] = out;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _nepaliLoading.remove(id);
+        _nepaliFailed.add(id);
+      });
+    }
+  }
+
+  void _onToggleAnswerLanguage() {
+    final next =
+        _answerLang == _AnswerLang.english ? _AnswerLang.nepali : _AnswerLang.english;
+    setState(() {
+      _answerLang = next;
+      if (next == _AnswerLang.nepali) {
+        _nepaliFailed.clear();
+      }
+    });
+    if (next == _AnswerLang.nepali) {
+      for (final line in _lines) {
+        if (line.role == 'assistant' && line.dbId != null && !line.streaming) {
+          unawaited(_fetchNepaliIfNeeded(line));
+        }
+      }
+    }
+  }
+
+  Widget _buildAssistantMessageBody(_ChatLine line, BuildContext context) {
+    final baseStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: PadhAiColors.textPrimary,
+        );
+    if (_answerLang == _AnswerLang.english || line.dbId == null) {
+      return _SafeMarkdown(data: line.content, style: baseStyle);
+    }
+    final id = line.dbId!;
+    if (_nepaliByMessageId.containsKey(id)) {
+      return _SafeMarkdown(
+        data: _nepaliByMessageId[id]!,
+        style: baseStyle,
+      );
+    }
+    if (_nepaliLoading.contains(id)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: PadhAiColors.secondary,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Loading Nepali…',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: PadhAiColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _SafeMarkdown(data: line.content, style: baseStyle),
+        ],
+      );
+    }
+    if (_nepaliFailed.contains(id)) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SafeMarkdown(data: line.content, style: baseStyle),
+          const SizedBox(height: 8),
+          Text(
+            'Nepali view unavailable. Check connection or try again.',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: PadhAiColors.textSecondary,
+                ),
+          ),
+        ],
+      );
+    }
+    return _SafeMarkdown(data: line.content, style: baseStyle);
   }
 
   @override
@@ -327,6 +494,18 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: _answerLang == _AnswerLang.english
+                ? 'Show answers in Nepali'
+                : 'Show answers in English',
+            onPressed: _onToggleAnswerLanguage,
+            icon: Icon(
+              Icons.translate_rounded,
+              color: _answerLang == _AnswerLang.nepali
+                  ? PadhAiColors.secondary
+                  : null,
+            ),
+          ),
           const PadhAccountMenuButton(),
           PopupMenuButton<String>(
             onSelected: (v) async {
@@ -428,15 +607,20 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
                                                   .bodyMedium
                                                   ?.copyWith(color: PadhAiColors.textPrimary),
                                             )
-                                          : _SafeMarkdown(
-                                              data: line.content,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyMedium
-                                                  ?.copyWith(
-                                                    color: PadhAiColors.textPrimary,
-                                                  ),
-                                            ),
+                                          : (line.streaming
+                                              // Streaming: render as plain selectable text to avoid
+                                              // re-parsing markdown/LaTeX on every token.
+                                              ? SelectableText(
+                                                  line.content,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyMedium
+                                                      ?.copyWith(
+                                                        color: PadhAiColors.textPrimary,
+                                                      ),
+                                                )
+                                              // Final: markdown + LaTeX (English or in-app Nepali).
+                                              : _buildAssistantMessageBody(line, context)),
                                     ),
                                   ),
                                 ),
@@ -488,7 +672,7 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _send(),
                         decoration: const InputDecoration(
-                          hintText: 'आफ्नो प्रश्न लेख्नुहोस्...',
+                          hintText: 'Type your question... / आफ्नो प्रश्न लेख्नुहोस्...',
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.symmetric(
                             horizontal: 14,
@@ -572,7 +756,7 @@ class _TypingBlock extends StatelessWidget {
                 const _BouncingDots(),
                 const SizedBox(height: 6),
                 Text(
-                  'PadhAI is thinking...',
+                  'GyaanAi is thinking...',
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                         color: PadhAiColors.textSecondary,
                         fontWeight: FontWeight.w600,

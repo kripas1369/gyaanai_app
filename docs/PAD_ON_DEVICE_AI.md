@@ -1,4 +1,4 @@
-# PadhAI: Bundled model (true offline) + Play Store
+# GyaanAi: Bundled model (true offline) + Play Store
 
 This doc answers: **how to ship AI inside the app**, **Play Store limits**, and how that differs from **Ollama on a laptop** or **Django hosting Gemma**.
 
@@ -96,7 +96,7 @@ Use a **native** on-device runner (no Ollama on phone):
 
 ---
 
-## Why the current PadhAI code uses Ollama
+## Why the current GyaanAi code uses Ollama
 
 The existing app uses **HTTP** to **Ollama** for fast iteration on a **PC**. That is **correct for development**. Shipping to Play Store with **true offline** requires the **native** stack above — it is a **separate engineering milestone**, not a config toggle.
 

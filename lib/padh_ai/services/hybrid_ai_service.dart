@@ -8,6 +8,9 @@ import '../../data/services/app_settings_service.dart';
 import 'gemma_offline_service.dart';
 import 'padh_ai_system_prompt.dart';
 
+// Re-export ChatHistoryMessage for use in chat screen
+export 'gemma_offline_service.dart' show ChatHistoryMessage;
+
 /// AI inference mode
 enum AiMode {
   online,      // Use Django API (Ollama on server)
@@ -46,6 +49,7 @@ class HybridAiService {
   DateTime? _lastConnectivityCheck;
   /// After a fast connection failure, skip hammering an unreachable host.
   DateTime? _negativeCacheUntil;
+  AiMode? _lastMode;
 
   static const _connectivityCacheDuration = Duration(seconds: 30);
   static const _healthCheckTimeout = Duration(milliseconds: 900);
@@ -64,14 +68,48 @@ class HybridAiService {
   ///   GET /api/ai/model/download/ → offline model binary
   Future<AiMode> getCurrentMode() async {
     final online = await _checkOnlineStatus();
-    if (online) return AiMode.online;
+    if (online) {
+      _lastMode = AiMode.online;
+      return AiMode.online;
+    }
 
-    if (gemmaService.isReady) return AiMode.offline;
+    if (gemmaService.isReady) {
+      _lastMode = AiMode.offline;
+      return AiMode.offline;
+    }
 
     final modelPath = await ModelManager.findModel();
-    if (modelPath != null) return AiMode.offline;
+    if (modelPath != null) {
+      _lastMode = AiMode.offline;
+      return AiMode.offline;
+    }
 
+    _lastMode = AiMode.unavailable;
     return AiMode.unavailable;
+  }
+
+  /// Fast mode lookup that avoids waiting on network health checks.
+  ///
+  /// - If we recently checked connectivity, reuse the cached result.
+  /// - If an offline model is already ready, prefer that immediately.
+  /// - Otherwise fall back to the last known mode while we attempt inference.
+  Future<AiMode> getCurrentModeFast() async {
+    // Offline ready? return instantly.
+    if (gemmaService.isReady) {
+      _lastMode = AiMode.offline;
+      return AiMode.offline;
+    }
+
+    // Recently checked connectivity? use cached state.
+    final now = DateTime.now();
+    if (_lastConnectivityCheck != null &&
+        now.difference(_lastConnectivityCheck!) < _connectivityCacheDuration) {
+      final mode = _isOnline ? AiMode.online : (_lastMode ?? AiMode.offline);
+      _lastMode = mode;
+      return mode;
+    }
+
+    return _lastMode ?? AiMode.offline;
   }
 
   /// Check if Django + Ollama AI is reachable (`/api/ai/health/` returns 200).
@@ -136,6 +174,8 @@ class HybridAiService {
     required String userMessage,
     String? systemPrompt,
     bool preferOffline = false,
+    int? sessionId,
+    List<ChatHistoryMessage>? history,
   }) async {
     String? last;
     await for (final acc in runInferenceStreaming(
@@ -144,6 +184,8 @@ class HybridAiService {
       userMessage: userMessage,
       systemPrompt: systemPrompt,
       preferOffline: preferOffline,
+      sessionId: sessionId,
+      history: history,
     )) {
       last = acc;
     }
@@ -151,44 +193,128 @@ class HybridAiService {
   }
 
   /// Stream inference — yields accumulated response as tokens arrive.
+  /// Now supports session tracking and conversation history for context-aware responses.
   Stream<String> runInferenceStreaming({
     required int grade,
     required String subjectEnglish,
     required String userMessage,
     String? systemPrompt,
     bool preferOffline = false,
+    int? sessionId,
+    List<ChatHistoryMessage>? history,
   }) async* {
-    final mode = await getCurrentMode();
+    final now = DateTime.now();
 
-    if (mode == AiMode.unavailable) {
-      yield 'No AI available. Please connect to internet or download the offline model.';
+    // If user asked to prefer offline, do it deterministically.
+    if (preferOffline) {
+      yield* _runOfflineInference(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+        sessionId: sessionId,
+        history: history,
+      );
       return;
     }
 
-    final useOffline = preferOffline && gemmaService.isReady || mode == AiMode.offline;
-
-    if (useOffline || mode == AiMode.offline) {
-      if (!gemmaService.isReady) {
-        final initialized = await gemmaService.initialize();
-        if (!initialized) {
-          yield 'Failed to load offline model. Please try again.';
-          return;
-        }
-      }
-      yield* gemmaService.runInferenceAccumulating(
+    // If we recently observed hard network failure, skip online attempts briefly.
+    if (_negativeCacheUntil != null && now.isBefore(_negativeCacheUntil!)) {
+      yield* _runOfflineOrUnavailable(
         grade: grade,
         subjectEnglish: subjectEnglish,
         userMessage: userMessage,
         systemPrompt: systemPrompt,
+        sessionId: sessionId,
+        history: history,
       );
-    } else {
-      yield* _runOnlineInference(
-        grade: grade,
-        subjectEnglish: subjectEnglish,
-        userMessage: userMessage,
-        systemPrompt: systemPrompt,
-      );
+      return;
     }
+
+    // Optimistic online-first: avoids waiting on `/api/ai/health/` per message.
+    // If online fails quickly, we transparently fall back to offline.
+    var producedAnyToken = false;
+    try {
+      await for (final acc in _runOnlineInference(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+      )) {
+        producedAnyToken = true;
+        yield acc;
+      }
+      _lastMode = AiMode.online;
+    } catch (e) {
+      debugPrint('HybridAiService: Online stream failed, falling back: $e');
+      // If we got nothing from online, fall back immediately.
+      if (!producedAnyToken) {
+        yield* _runOfflineOrUnavailable(
+          grade: grade,
+          subjectEnglish: subjectEnglish,
+          userMessage: userMessage,
+          systemPrompt: systemPrompt,
+          sessionId: sessionId,
+          history: history,
+        );
+      } else {
+        // If we already streamed part of an answer, don't switch mid-message.
+        yield '\n\n(Connectivity issue while streaming. Please try again.)';
+      }
+    } finally {
+      // Opportunistically refresh mode in the background for the next request.
+      // (Do not await — keeps current request snappy.)
+      unawaited(getCurrentMode());
+    }
+  }
+
+  Stream<String> _runOfflineInference({
+    required int grade,
+    required String subjectEnglish,
+    required String userMessage,
+    String? systemPrompt,
+    int? sessionId,
+    List<ChatHistoryMessage>? history,
+  }) async* {
+    if (!gemmaService.isReady) {
+      final initialized = await gemmaService.initialize();
+      if (!initialized) {
+        yield 'Failed to load offline model. Please try again.';
+        return;
+      }
+    }
+    _lastMode = AiMode.offline;
+    yield* gemmaService.runInferenceAccumulating(
+      grade: grade,
+      subjectEnglish: subjectEnglish,
+      userMessage: userMessage,
+      systemPrompt: systemPrompt,
+      sessionId: sessionId,
+      history: history,
+    );
+  }
+
+  Stream<String> _runOfflineOrUnavailable({
+    required int grade,
+    required String subjectEnglish,
+    required String userMessage,
+    String? systemPrompt,
+    int? sessionId,
+    List<ChatHistoryMessage>? history,
+  }) async* {
+    if (gemmaService.isReady || await ModelManager.findModel() != null) {
+      yield* _runOfflineInference(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+        sessionId: sessionId,
+        history: history,
+      );
+      return;
+    }
+    _lastMode = AiMode.unavailable;
+    yield 'No AI available. Please connect to internet or download the offline model.';
   }
 
   /// Online inference via Django → Ollama SSE streaming.
@@ -203,10 +329,11 @@ class HybridAiService {
 
     final uri = Uri.parse('$_baseUrl/api/ai/chat/stream/');
 
+    http.Client? client;
     try {
-      final request = http.Request('POST', uri);
-      request.headers['Content-Type'] = 'application/json';
-      request.headers['Accept'] = 'text/event-stream';
+      final request = http.Request('POST', uri)
+        ..headers['Content-Type'] = 'application/json'
+        ..headers['Accept'] = 'text/event-stream';
 
       final token = settings.accessToken;
       if (token != null && token.isNotEmpty) {
@@ -220,53 +347,73 @@ class HybridAiService {
         'system_prompt': system,
       });
 
-      final client = http.Client();
+      client = http.Client();
       final streamedResponse = await client.send(request).timeout(
         const Duration(seconds: 60),
       );
 
       if (streamedResponse.statusCode != 200) {
         final body = await streamedResponse.stream.bytesToString();
-        yield 'Server error: ${streamedResponse.statusCode}. $body';
-        client.close();
-        return;
+        // Treat as a connection failure so callers can fall back quickly.
+        _negativeCacheUntil = DateTime.now().add(_negativeCacheAfterFailure);
+        throw StateError('Server error: ${streamedResponse.statusCode}. $body');
       }
 
+      // Parse SSE robustly: "data: ..." lines can be split across TCP chunks.
       var accumulated = '';
+      var buffer = '';
+      var done = false;
+
       await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
-        for (final line in chunk.split('\n')) {
-          if (line.startsWith('data: ')) {
-            try {
-              final data = jsonDecode(line.substring(6));
-              if (data is Map && data['token'] != null) {
-                accumulated += data['token'] as String;
-                yield accumulated;
-              } else if (data is Map && data['done'] == true) {
-                break;
-              }
-            } catch (_) {
-              // Skip malformed JSON
+        if (done) break;
+        buffer += chunk;
+
+        while (true) {
+          final nl = buffer.indexOf('\n');
+          if (nl == -1) break;
+          var line = buffer.substring(0, nl);
+          buffer = buffer.substring(nl + 1);
+
+          if (line.endsWith('\r')) {
+            line = line.substring(0, line.length - 1);
+          }
+          if (!line.startsWith('data:')) continue;
+
+          final payload = line.length >= 6 ? line.substring(5).trimLeft() : '';
+          if (payload.isEmpty) continue;
+
+          try {
+            final data = jsonDecode(payload);
+            if (data is Map && data['token'] != null) {
+              _negativeCacheUntil = null;
+              _isOnline = true;
+              _lastConnectivityCheck = DateTime.now();
+              accumulated += data['token'] as String;
+              yield accumulated;
+            } else if (data is Map && data['done'] == true) {
+              done = true;
+              break;
             }
+          } catch (_) {
+            // Skip malformed JSON
           }
         }
       }
-
-      client.close();
     } catch (e) {
       debugPrint('HybridAiService: Online inference error: $e');
 
-      // Fallback to offline if available
-      if (gemmaService.isReady || await ModelManager.findModel() != null) {
-        debugPrint('HybridAiService: Falling back to offline mode');
-        yield* gemmaService.runInferenceAccumulating(
-          grade: grade,
-          subjectEnglish: subjectEnglish,
-          userMessage: userMessage,
-          systemPrompt: systemPrompt,
-        );
-      } else {
-        yield 'Connection error: $e';
+      // Mark online as likely down; callers may choose to fall back.
+      _isOnline = false;
+      final msg = e.toString();
+      if (msg.contains('SocketException') ||
+          msg.contains('Connection refused') ||
+          msg.contains('Failed host lookup') ||
+          msg.contains('timeout')) {
+        _negativeCacheUntil = DateTime.now().add(_negativeCacheAfterFailure);
       }
+      rethrow;
+    } finally {
+      client?.close();
     }
   }
 
@@ -296,5 +443,21 @@ class HybridAiService {
   Future<String?> getModelDownloadUrl() async {
     final info = await getModelInfo();
     return info?['download_url'] as String?;
+  }
+
+  /// Release offline model for memory pressure situations.
+  /// Call this when the app receives low memory warnings.
+  Future<void> releaseForMemoryPressure() async {
+    await gemmaService.releaseForMemoryPressure();
+  }
+
+  /// Clear conversation session (e.g., when starting new chat).
+  void clearSession(int sessionId) {
+    gemmaService.clearSession(sessionId);
+  }
+
+  /// Clear all conversation sessions.
+  void clearAllSessions() {
+    gemmaService.clearAllSessions();
   }
 }

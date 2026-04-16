@@ -211,7 +211,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
 
               // Description
               Text(
-                'To use PadhAI offline, you need to download the AI model ($modelSizeText).',
+                'To use GyaanAi offline, you need to download the AI model ($modelSizeText).',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: PadhAiColors.textSecondary,

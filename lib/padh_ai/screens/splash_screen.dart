@@ -69,6 +69,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       if (success) {
         setState(() => _loadingStatus = 'AI Ready!');
         await Future.delayed(const Duration(milliseconds: 300));
+        // Start background warm-up after navigation (doesn't block UI)
+        _startBackgroundWarmup(gemma);
         _navigateToMain();
       } else {
         // Model loading failed → go to download screen
@@ -78,6 +80,32 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     } catch (e) {
       setState(() => _error = e.toString());
     }
+  }
+
+  /// Background warm-up: pre-create a chat session so first inference is faster.
+  /// This runs after navigation so it doesn't block the splash screen.
+  void _startBackgroundWarmup(GemmaOfflineService gemma) {
+    // Don't await - let it run in background
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      try {
+        // Pre-warm by creating a dummy session - this initializes native resources
+        // but doesn't block the user from navigating
+        debugPrint('GemmaService: Starting background warm-up...');
+        // Use a quick inference with minimal output to warm up the model
+        await for (final _ in gemma.runInferenceAccumulating(
+          grade: 10,
+          subjectEnglish: 'General',
+          userMessage: 'Hi',
+          maxOutputTokens: 5, // Just a few tokens to warm up
+        )) {
+          // Consume tokens but don't display
+        }
+        debugPrint('GemmaService: Background warm-up complete');
+      } catch (e) {
+        // Ignore warm-up errors - first real chat will retry
+        debugPrint('GemmaService: Background warm-up failed (will retry on first chat): $e');
+      }
+    });
   }
 
   void _navigateToMain() {
@@ -130,7 +158,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                 const SizedBox(height: 20),
 
                 Text(
-                  'PadhAI',
+                  'GyaanAi',
                   style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: PadhAiColors.primary,

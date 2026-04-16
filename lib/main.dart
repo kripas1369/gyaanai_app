@@ -9,6 +9,9 @@ import 'padh_ai/providers/padh_ai_providers.dart';
 import 'padh_ai/screens/splash_screen.dart';
 import 'padh_ai/theme/padh_ai_theme.dart';
 
+/// Global container reference for memory pressure handling
+ProviderContainer? _globalContainer;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -22,25 +25,64 @@ Future<void> main() async {
     // Ignore initialization errors - will handle in splash screen
   });
 
+  // Create container with memory pressure handling
+  final container = ProviderContainer(
+    overrides: [
+      localDbProvider.overrideWithValue(db),
+      appSettingsProvider.overrideWithValue(settings),
+      sharedPrefsProvider.overrideWithValue(prefs),
+    ],
+  );
+  _globalContainer = container;
+
   runApp(
-    ProviderScope(
-      overrides: [
-        localDbProvider.overrideWithValue(db),
-        appSettingsProvider.overrideWithValue(settings),
-        sharedPrefsProvider.overrideWithValue(prefs),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: const GyaanApp(),
     ),
   );
 }
 
-class GyaanApp extends StatelessWidget {
+class GyaanApp extends StatefulWidget {
   const GyaanApp({super.key});
+
+  @override
+  State<GyaanApp> createState() => _GyaanAppState();
+}
+
+class _GyaanAppState extends State<GyaanApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Handle memory pressure from system (critical for 2GB RAM devices)
+  @override
+  void didHaveMemoryPressure() {
+    debugPrint('GyaanApp: Memory pressure detected, releasing AI resources');
+    // Release AI model to free memory
+    final container = _globalContainer;
+    if (container != null) {
+      try {
+        final hybridService = container.read(hybridAiProvider);
+        hybridService.releaseForMemoryPressure();
+      } catch (e) {
+        debugPrint('GyaanApp: Error releasing AI resources: $e');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'PadhAI',
+      title: 'GyaanAi',
       theme: padhAiLightTheme(),
       darkTheme: padhAiDarkTheme(),
       themeMode: ThemeMode.system,

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// PadhAI design tokens (Material 3 + Mukta for Devanagari).
+/// GyaanAi design tokens (Material 3 + Mukta for Devanagari).
 class PadhAiColors {
   static const primary = Color(0xFF1B5E20);
   static const secondary = Color(0xFF388E3C);
