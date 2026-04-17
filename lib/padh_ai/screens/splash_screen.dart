@@ -32,9 +32,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _initializeApp() async {
-    // Minimum splash time for branding
-    final minSplashFuture = Future.delayed(const Duration(milliseconds: 1500));
-
+    // SPEED: No forced delays - show splash only while actually loading
     try {
       setState(() => _loadingStatus = 'Checking AI model...');
 
@@ -43,7 +41,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       // Check if platform supports offline AI
       if (!GemmaOfflineService.platformSupported) {
         setState(() => _loadingStatus = 'Platform not supported for offline AI');
-        await minSplashFuture;
         _goToDownload();
         return;
       }
@@ -54,23 +51,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       if (modelPath == null) {
         // No model found → go to download screen
         setState(() => _loadingStatus = 'AI model not found');
-        await minSplashFuture;
         _goToDownload();
         return;
       }
 
-      // Model found → load LiteRT only (skip full warm-up generation — that can take
-      // many minutes on Android and looked like a frozen splash; first chat validates).
+      // Model found → load LiteRT only (skip warm-up for fastest startup)
       setState(() => _loadingStatus = 'Loading AI model...');
       final success = await gemma.initialize(skipWarmup: true);
 
-      await minSplashFuture;
-
       if (success) {
         setState(() => _loadingStatus = 'AI Ready!');
-        await Future.delayed(const Duration(milliseconds: 300));
-        // Start background warm-up after navigation (doesn't block UI)
-        _startBackgroundWarmup(gemma);
+        // SPEED: Navigate immediately, no extra delays
         _navigateToMain();
       } else {
         // Model loading failed → go to download screen
@@ -80,32 +71,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
     } catch (e) {
       setState(() => _error = e.toString());
     }
-  }
-
-  /// Background warm-up: pre-create a chat session so first inference is faster.
-  /// This runs after navigation so it doesn't block the splash screen.
-  void _startBackgroundWarmup(GemmaOfflineService gemma) {
-    // Don't await - let it run in background
-    Future.delayed(const Duration(milliseconds: 500), () async {
-      try {
-        // Pre-warm by creating a dummy session - this initializes native resources
-        // but doesn't block the user from navigating
-        debugPrint('GemmaService: Starting background warm-up...');
-        // Use a quick inference with minimal output to warm up the model
-        await for (final _ in gemma.runInferenceAccumulating(
-          grade: 10,
-          subjectEnglish: 'General',
-          userMessage: 'Hi',
-          maxOutputTokens: 5, // Just a few tokens to warm up
-        )) {
-          // Consume tokens but don't display
-        }
-        debugPrint('GemmaService: Background warm-up complete');
-      } catch (e) {
-        // Ignore warm-up errors - first real chat will retry
-        debugPrint('GemmaService: Background warm-up failed (will retry on first chat): $e');
-      }
-    });
   }
 
   void _navigateToMain() {

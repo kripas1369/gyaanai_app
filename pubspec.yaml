@@ -50,6 +50,7 @@ dependencies:
   flutter_gemma: 0.12.6
   large_file_handler: ^0.3.1
   flutter_markdown_latex: ^0.3.4
+  translator: ^1.0.0
 
 dev_dependencies:
   flutter_test:

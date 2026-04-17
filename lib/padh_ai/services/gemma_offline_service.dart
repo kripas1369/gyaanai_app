@@ -458,6 +458,12 @@ class GemmaOfflineService {
     _sessions.clear();
   }
 
+  /// Clear all sessions EXCEPT the specified one.
+  /// Use when switching to a different chat to prevent context bleeding.
+  void clearOtherSessions(int keepSessionId) {
+    _sessions.removeWhere((key, _) => key != keepSessionId);
+  }
+
   Future<void> _releaseModelInstance() async {
     clearAllSessions();
     try {
@@ -745,8 +751,8 @@ class GemmaOfflineService {
 
           var acc = '';
           var tokenCount = 0;
-          // SPEED: Yield every 3 tokens (faster than time-based checks)
-          const yieldEveryNTokens = 3;
+          // SPEED: Yield every token for smoother word-by-word display
+          const yieldEveryNTokens = 1;
 
           await for (final response in chat.generateChatResponseAsync()) {
             if (response is TextResponse) {

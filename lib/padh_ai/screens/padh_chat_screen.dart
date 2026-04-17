@@ -12,6 +12,7 @@ import '../navigation/slide_route.dart';
 import '../providers/padh_ai_providers.dart';
 import '../services/hybrid_ai_service.dart'; // exports ChatHistoryMessage
 import '../services/padh_ai_system_prompt.dart';
+import '../services/translation_service.dart';
 import '../theme/padh_ai_theme.dart';
 import '../widgets/padh_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
@@ -56,12 +57,7 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
     _load();
     _checkAiMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Initialize model if in offline mode
-      ref.read(hybridAiProvider).getCurrentMode().then((mode) {
-        if (mode == AiMode.offline) {
-          ref.read(gemmaOfflineProvider).loadModel().catchError((_) {});
-        }
-      });
+      // Model already loaded in splash - no need to reload here
       if (mounted) _focus.requestFocus();
     });
   }
@@ -85,6 +81,9 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
   }
 
   Future<void> _load() async {
+    // Clear other Gemma sessions to prevent context bleeding across grade/subject
+    ref.read(gemmaOfflineProvider).clearOtherSessions(widget.sessionId);
+
     final repo = ref.read(padhChatRepoProvider);
     final rows = await repo.messagesForSession(widget.sessionId);
     if (!mounted) return;
@@ -296,14 +295,6 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
     Navigator.of(context).pop();
   }
 
-  static const _kMaxTranslationChars = 10000;
-
-  String _trimForTranslation(String s) {
-    final t = s.trim();
-    if (t.length <= _kMaxTranslationChars) return t;
-    return '${t.substring(0, _kMaxTranslationChars)}\n\n[…truncated]';
-  }
-
   void _prefetchNepaliIfNeeded() {
     if (_answerLang != _AnswerLang.nepali) return;
     for (final line in _lines) {
@@ -326,17 +317,9 @@ class _PadhChatScreenState extends ConsumerState<PadhChatScreen> {
 
     setState(() => _nepaliLoading.add(id));
 
-    final hybrid = ref.read(hybridAiProvider);
+    // Use fast package-based translation instead of AI
     try {
-      final translated = await hybrid.runInference(
-        grade: widget.grade,
-        subjectEnglish: widget.subject.english,
-        systemPrompt: buildTutorAnswerTranslationSystemPrompt(),
-        userMessage:
-            'Translate the following tutor reply into Nepali (see system rules).\n\n---\n\n${_trimForTranslation(source)}',
-        sessionId: null,
-        history: null,
-      );
+      final translated = await TranslationService.instance.toNepali(source);
       final out = translated.trim();
       if (!mounted) return;
       setState(() {
