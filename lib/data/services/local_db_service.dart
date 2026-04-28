@@ -57,18 +57,18 @@ CREATE TABLE sync_queue (
         await db.execute(
           'CREATE INDEX idx_topics_subject ON topics(subject_id)',
         );
-        await _createPadhAiChatTables(db);
+        await _createGyaanAiChatTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          await _createPadhAiChatTables(db);
+          await _createGyaanAiChatTables(db);
         }
       },
     );
     return LocalDbService(db);
   }
 
-  static Future<void> _createPadhAiChatTables(Database db) async {
+  static Future<void> _createGyaanAiChatTables(Database db) async {
     await db.execute('''
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -184,6 +184,23 @@ CREATE TABLE IF NOT EXISTS messages (
       'messages',
       where: 'session_id = ?',
       whereArgs: [sessionId],
+    );
+  }
+
+  Future<void> deleteMessage(int messageId) async {
+    await _db.delete(
+      'messages',
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
+  Future<void> updateMessageContent(int messageId, String content) async {
+    await _db.update(
+      'messages',
+      {'content': content},
+      where: 'id = ?',
+      whereArgs: [messageId],
     );
   }
 

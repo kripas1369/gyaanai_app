@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/slide_route.dart';
-import '../providers/padh_ai_providers.dart';
+import '../providers/gyaan_ai_providers.dart';
 import '../services/model_loader_service.dart';
-import '../theme/padh_ai_theme.dart';
+import '../theme/gyaan_ai_theme.dart';
 import 'grade_selection_screen.dart';
 
 /// Simple screen to download the AI model.
@@ -172,7 +172,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
         _progress != null && _progress!.bytesDownloaded > 0 && !_isDownloading;
 
     return Scaffold(
-      backgroundColor: PadhAiColors.background,
+      backgroundColor: GyaanAiColors.background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -184,16 +184,16 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                 width: 100,
                 height: 100,
                 decoration: BoxDecoration(
-                  color: PadhAiColors.primary.withValues(alpha: 0.12),
+                  color: GyaanAiColors.primary.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: PadhAiColors.secondary.withValues(alpha: 0.4),
+                    color: GyaanAiColors.secondary.withValues(alpha: 0.4),
                   ),
                 ),
                 child: Icon(
                   _isDownloading ? Icons.download_rounded : Icons.smart_toy_rounded,
                   size: 48,
-                  color: PadhAiColors.primary,
+                  color: GyaanAiColors.primary,
                 ),
               ),
               const SizedBox(height: 32),
@@ -204,7 +204,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: PadhAiColors.primary,
+                      color: GyaanAiColors.primary,
                     ),
               ),
               const SizedBox(height: 12),
@@ -214,7 +214,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                 'To use GyaanAi offline, you need to download the AI model ($modelSizeText).',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: PadhAiColors.textSecondary,
+                      color: GyaanAiColors.textSecondary,
                     ),
               ),
               const SizedBox(height: 40),
@@ -226,7 +226,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                 Text(
                   'Connecting to server...',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PadhAiColors.textSecondary,
+                        color: GyaanAiColors.textSecondary,
                       ),
                 ),
               ]
@@ -239,9 +239,9 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   child: LinearProgressIndicator(
                     value: _progress!.progress,
                     minHeight: 16,
-                    backgroundColor: PadhAiColors.primary.withValues(alpha: 0.12),
+                    backgroundColor: GyaanAiColors.primary.withValues(alpha: 0.12),
                     valueColor: const AlwaysStoppedAnimation<Color>(
-                      PadhAiColors.secondary,
+                      GyaanAiColors.secondary,
                     ),
                   ),
                 ),
@@ -253,7 +253,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: PadhAiColors.primary,
+                        color: GyaanAiColors.primary,
                       ),
                 ),
                 const SizedBox(height: 8),
@@ -264,7 +264,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: PadhAiColors.textPrimary,
+                        color: GyaanAiColors.textPrimary,
                       ),
                 ),
                 const SizedBox(height: 8),
@@ -274,7 +274,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   '${_formatBytes(_progress!.bytesDownloaded)} / ${_formatBytes(_progress!.totalBytes)}',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PadhAiColors.textSecondary,
+                        color: GyaanAiColors.textSecondary,
                       ),
                 ),
 
@@ -284,20 +284,20 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
-                      color: PadhAiColors.secondary.withValues(alpha: 0.1),
+                      color: GyaanAiColors.secondary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.speed, size: 16, color: PadhAiColors.secondary),
+                        const Icon(Icons.speed, size: 16, color: GyaanAiColors.secondary),
                         const SizedBox(width: 6),
                         Text(
                           _progress!.speedText,
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: PadhAiColors.secondary,
+                            color: GyaanAiColors.secondary,
                           ),
                         ),
                         if (_progress!.timeRemainingText.isNotEmpty) ...[
@@ -306,7 +306,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                             '• ${_progress!.timeRemainingText}',
                             style: TextStyle(
                               fontSize: 13,
-                              color: PadhAiColors.textSecondary.withValues(alpha: 0.8),
+                              color: GyaanAiColors.textSecondary.withValues(alpha: 0.8),
                             ),
                           ),
                         ],
@@ -333,7 +333,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                           : 'Retry Connection',
                     ),
                     style: FilledButton.styleFrom(
-                      backgroundColor: PadhAiColors.primary,
+                      backgroundColor: GyaanAiColors.primary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),
@@ -345,7 +345,7 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                     '${_formatBytes(_progress!.bytesDownloaded)} already downloaded',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: PadhAiColors.textSecondary,
+                          color: GyaanAiColors.textSecondary,
                         ),
                   ),
                 ],
@@ -398,13 +398,13 @@ class _ModelDownloadScreenState extends ConsumerState<ModelDownloadScreen> {
                   Icon(
                     Icons.wifi_off_rounded,
                     size: 16,
-                    color: PadhAiColors.textSecondary.withValues(alpha: 0.6),
+                    color: GyaanAiColors.textSecondary.withValues(alpha: 0.6),
                   ),
                   const SizedBox(width: 6),
                   Text(
                     'Works offline after download',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: PadhAiColors.textSecondary.withValues(alpha: 0.6),
+                          color: GyaanAiColors.textSecondary.withValues(alpha: 0.6),
                         ),
                   ),
                 ],

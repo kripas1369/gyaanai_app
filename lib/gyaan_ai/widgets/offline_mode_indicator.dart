@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../providers/padh_ai_providers.dart';
+import '../providers/gyaan_ai_providers.dart';
 import '../services/gemma_offline_service.dart';
-import '../theme/padh_ai_theme.dart';
+import '../theme/gyaan_ai_theme.dart';
 
 /// Shows the current offline/online status and AI model status.
 /// Compact indicator for use in AppBar or anywhere in the UI.
@@ -19,11 +19,11 @@ class OfflineModeIndicator extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final connectivity = ref.watch(padhConnectivityProvider);
+    final connectivity = ref.watch(gyaanAiConnectivityProvider);
     final gemma = ref.watch(gemmaOfflineProvider);
 
     final isOnline = connectivity.maybeWhen(
-      data: (m) => m == PadhConnectivityLabel.online,
+      data: (m) => m == GyaanAiConnectivityLabel.online,
       orElse: () => false,
     );
 
@@ -45,7 +45,7 @@ class OfflineModeIndicator extends ConsumerWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: PadhAiColors.textSecondary,
+                  color: GyaanAiColors.textSecondary,
                   fontWeight: FontWeight.w500,
                 ),
           ),
@@ -55,7 +55,7 @@ class OfflineModeIndicator extends ConsumerWidget {
           Icon(
             Icons.smart_toy_rounded,
             size: 14,
-            color: PadhAiColors.secondary.withValues(alpha: 0.7),
+            color: GyaanAiColors.secondary.withValues(alpha: 0.7),
           ),
         ],
       ],
@@ -67,7 +67,7 @@ class OfflineModeIndicator extends ConsumerWidget {
       if (isOnline) {
         return (Colors.green, Icons.cloud_done_rounded, 'Online + AI Ready');
       } else {
-        return (PadhAiColors.secondary, Icons.offline_bolt_rounded, 'Offline AI Active');
+        return (GyaanAiColors.secondary, Icons.offline_bolt_rounded, 'Offline AI Active');
       }
     } else {
       if (isOnline) {

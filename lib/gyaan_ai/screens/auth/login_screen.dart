@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/services/api_service.dart';
 import '../../navigation/slide_route.dart';
-import '../../providers/padh_ai_providers.dart';
-import '../../theme/padh_ai_theme.dart';
+import '../../providers/gyaan_ai_providers.dart';
+import '../../theme/gyaan_ai_theme.dart';
 import '../grade_selection_screen.dart';
-import '../padh_settings_screen.dart';
+import '../gyaan_ai_settings_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -76,7 +76,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PadhAiColors.background,
+      backgroundColor: GyaanAiColors.background,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -93,16 +93,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: PadhAiColors.primary.withValues(alpha: 0.1),
+                      color: GyaanAiColors.primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: PadhAiColors.secondary.withValues(alpha: 0.4),
+                        color: GyaanAiColors.secondary.withValues(alpha: 0.4),
                       ),
                     ),
                     child: const Icon(
                       Icons.menu_book_rounded,
                       size: 40,
-                      color: PadhAiColors.primary,
+                      color: GyaanAiColors.primary,
                     ),
                   ),
                 ),
@@ -112,7 +112,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: PadhAiColors.primary,
+                        color: GyaanAiColors.primary,
                       ),
                 ),
                 const SizedBox(height: 6),
@@ -120,7 +120,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   'Sign in to your account',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: PadhAiColors.textSecondary,
+                        color: GyaanAiColors.textSecondary,
                       ),
                 ),
                 const SizedBox(height: 36),
@@ -194,7 +194,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   child: FilledButton(
                     onPressed: _isLoading ? null : _login,
                     style: FilledButton.styleFrom(
-                      backgroundColor: PadhAiColors.primary,
+                      backgroundColor: GyaanAiColors.primary,
                     ),
                     child: _isLoading
                         ? const SizedBox(
@@ -233,7 +233,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   children: [
                     Text(
                       "Don't have an account? ",
-                      style: TextStyle(color: PadhAiColors.textSecondary),
+                      style: TextStyle(color: GyaanAiColors.textSecondary),
                     ),
                     GestureDetector(
                       onTap: _isLoading
@@ -244,7 +244,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: Text(
                         'Register',
                         style: TextStyle(
-                          color: PadhAiColors.primary,
+                          color: GyaanAiColors.primary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -256,7 +256,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   onPressed: _isLoading
                       ? null
                       : () => Navigator.of(context).push(
-                            slideFromRight(const PadhSettingsScreen()),
+                            slideFromRight(const GyaanAiSettingsScreen()),
                           ),
                   icon: const Icon(Icons.dns_outlined, size: 18),
                   label: const Text('Server settings'),

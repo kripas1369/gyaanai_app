@@ -13,6 +13,14 @@ class SubjectItem {
   final String emoji;
 }
 
+/// General AI subject - not tied to any grade/curriculum
+const generalSubject = SubjectItem(
+  key: 'general',
+  nepali: 'सामान्य',
+  english: 'General',
+  emoji: '🤖',
+);
+
 List<SubjectItem> subjectsForGrade(int grade) {
   if (grade >= 1 && grade <= 3) {
     return const [

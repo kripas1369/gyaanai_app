@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'padh_ai_system_prompt.dart';
+import 'conversation_memory_manager.dart';
+import 'gyaan_ai_system_prompt.dart';
 
 /// Represents a message in chat history for context building.
 class ChatHistoryMessage {
@@ -29,12 +30,23 @@ class ChatHistoryMessage {
 /// Note: Using dynamic for chat since flutter_gemma doesn't export Chat type directly.
 class _ConversationSession {
   final int sessionId;
-  final dynamic chat; // GemmaChat from flutter_gemma
+  final int grade;
+  final String subject;
+  dynamic chat; // GemmaChat from flutter_gemma - mutable for recreation
   final List<ChatHistoryMessage> history;
   DateTime lastUsed;
+  bool _disposed = false;
+
+  /// Whether this session's Chat object was just created (fresh KV cache).
+  /// CRITICAL: This is separate from history.isEmpty because we might create
+  /// a new Chat object with history loaded from database - in that case,
+  /// history is not empty but KV cache IS empty!
+  bool _chatJustCreated = true;
 
   _ConversationSession({
     required this.sessionId,
+    required this.grade,
+    required this.subject,
     required this.chat,
     List<ChatHistoryMessage>? history,
   })  : history = history ?? [],
@@ -43,6 +55,35 @@ class _ConversationSession {
   void addMessage(ChatHistoryMessage msg) {
     history.add(msg);
     lastUsed = DateTime.now();
+  }
+
+  /// Check if this session matches the given grade/subject
+  bool matches(int g, String s) => grade == g && subject == s;
+
+  /// Mark session as disposed (chat object no longer valid).
+  /// Returns the old chat object so the caller can close its native session.
+  dynamic takeChat() {
+    _disposed = true;
+    final c = chat;
+    chat = null;
+    return c;
+  }
+
+  /// Mark session as disposed without needing the chat reference.
+  void markDisposed() {
+    _disposed = true;
+    chat = null;
+  }
+
+  bool get isDisposed => _disposed;
+
+  /// Returns true if the Chat object was just created (KV cache is empty).
+  /// Once we do a full context build, this becomes false.
+  bool get isChatFresh => _chatJustCreated;
+
+  /// Mark that the Chat object's KV cache has been populated.
+  void markChatUsed() {
+    _chatJustCreated = false;
   }
 }
 
@@ -182,9 +223,33 @@ String _friendlyEmptyLiteRtOutput() {
       'Try updating the app, freeing RAM, re-downloading the model, or use online mode.';
 }
 
+/// Detects if user message is a continuation request.
+/// ChatGPT-like behavior: "continue", "go on", "more", etc.
+bool _isContinuationRequest(String message) {
+  final lower = message.toLowerCase().trim();
+  const continuePhrases = [
+    'continue',
+    'go on',
+    'keep going',
+    'more',
+    'and then',
+    'what else',
+    'tell me more',
+    'explain more',
+    'जारी राख',
+    'अझै',
+    'थप',
+  ];
+  return continuePhrases.any((p) => lower == p || lower.startsWith('$p ') || lower.startsWith('$p,'));
+}
+
 /// Builds prompt with conversation history for context-aware responses.
-/// Pattern from Google AI Edge Gallery: format chat history before new message.
-/// OPTIMIZED for 2GB RAM devices: minimal history, shorter truncation.
+/// Pattern from ChatGPT/Claude: include enough context for follow-up questions.
+///
+/// Key behaviors:
+/// - Continuation requests ("continue", "more") get FULL last response
+/// - Normal questions get recent turns with smart truncation
+/// - Session isolation: each grade/subject has separate context
 String _buildOfflineInferencePrompt({
   required int grade,
   required String subjectEnglish,
@@ -192,46 +257,87 @@ String _buildOfflineInferencePrompt({
   String? systemPrompt,
   required int maxChars,
   List<ChatHistoryMessage>? history,
+  bool isLowRamDevice = true,
 }) {
+  String sanitize(String input) {
+    var s = input.trim();
+    if (s.isEmpty) return s;
+    s = s.replaceAll(RegExp(r'^\s*(Student|Teacher)\s*:\s*', multiLine: true), '');
+    final lines = s.split('\n');
+    final kept = <String>[];
+    for (final raw in lines) {
+      final line = raw.trimRight();
+      final trimmed = line.trimLeft();
+      if (trimmed.isEmpty) continue;
+      if (RegExp(r'^[IWEFDV]/[A-Za-z0-9_().-]+\b').hasMatch(trimmed)) continue;
+      if (trimmed.startsWith('<|turn') || trimmed.contains('<turn|>')) continue;
+      kept.add(line);
+    }
+    return kept.join('\n').trim();
+  }
+
   var system = systemPrompt ??
-      buildPadhAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
-  // REDUCED: Shorter system prompt = faster prefill, less memory
-  if (system.length > 350) {
-    system = system.substring(0, 350);
+      buildGyaanAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
+  // System prompt truncation - AGGRESSIVE for fast prefill
+  // Class 7 doesn't need verbose system prompts
+  final maxSystemChars = isLowRamDevice ? 250 : 400;
+  if (system.length > maxSystemChars) {
+    system = system.substring(0, maxSystemChars);
   }
 
   final buffer = StringBuffer(system);
   buffer.write('\n\n');
 
-  // Add conversation history for context (like AICore's formatChatPrompt)
-  // REDUCED from 6 to 3 turns for low-RAM devices
+  final cleanedUserMessage = sanitize(userMessage);
+  final isContinuation = _isContinuationRequest(cleanedUserMessage);
+
+  // Add conversation history for context
   if (history != null && history.isNotEmpty) {
-    // Take last 3 turns only (reduced from 6)
-    final recentHistory = history.length > 3
-        ? history.sublist(history.length - 3)
+    // For continuation: include last exchange (trimmed)
+    // For normal: include only last 2 turns for speed
+    final maxTurns = isContinuation ? 2 : (isLowRamDevice ? 2 : 4);
+    final maxMsgChars = isContinuation ? 500 : (isLowRamDevice ? 200 : 350);
+
+    final recentHistory = history.length > maxTurns
+        ? history.sublist(history.length - maxTurns)
         : history;
 
     for (final msg in recentHistory) {
       final role = msg.role == 'user' ? 'Student' : 'Teacher';
-      var content = msg.content.trim();
-      // REDUCED: Truncate history messages to 150 chars (was 300)
-      if (content.length > 150) {
-        content = '${content.substring(0, 150)}…';
+      var content = sanitize(msg.content);
+      if (content.isEmpty) continue;
+
+      // For continuation requests, keep full last assistant response
+      final isLastAssistantMsg = msg == recentHistory.last && msg.role == 'assistant';
+      if (!isLastAssistantMsg && content.length > maxMsgChars) {
+        content = '${content.substring(0, maxMsgChars)}…';
       }
       buffer.write('$role: $content\n\n');
     }
   }
 
-  // Current user message - REDUCED truncation limit
-  var user = userMessage.trim();
-  if (user.length > 500) {
-    user = '${user.substring(0, 500)}…';
+  // Current user message - keep short for fast prefill
+  var user = cleanedUserMessage.trim();
+  final maxUserChars = isLowRamDevice ? 400 : 600;
+  if (user.length > maxUserChars) {
+    user = '${user.substring(0, maxUserChars)}…';
   }
   buffer.write('Student: $user\n\nTeacher:');
 
   var prompt = buffer.toString();
   if (prompt.length > maxChars) {
-    // If too long, drop all history and retry
+    // If too long, reduce history and retry
+    if (history != null && history.length > 2) {
+      return _buildOfflineInferencePrompt(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+        maxChars: maxChars,
+        history: history.sublist(history.length - 2), // Keep only last 2 messages
+        isLowRamDevice: isLowRamDevice,
+      );
+    }
     if (history != null && history.isNotEmpty) {
       return _buildOfflineInferencePrompt(
         grade: grade,
@@ -240,53 +346,12 @@ String _buildOfflineInferencePrompt({
         systemPrompt: systemPrompt,
         maxChars: maxChars,
         history: [], // Drop all history on overflow
+        isLowRamDevice: isLowRamDevice,
       );
     }
     prompt = prompt.substring(0, maxChars);
   }
   return prompt;
-}
-
-/// Check if a question is similar to one already in history.
-/// Returns the previous answer if found, null otherwise.
-String? _findSimilarQuestionInHistory(
-  String question,
-  List<ChatHistoryMessage> history,
-) {
-  if (history.isEmpty) return null;
-
-  final normalized = question.toLowerCase().trim();
-  // Remove common filler words for comparison
-  final keywords = normalized
-      .replaceAll(RegExp(r'\b(what|is|the|a|an|how|why|when|where|can|you|please|explain|tell|me|about)\b'), '')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-
-  if (keywords.length < 5) return null;
-
-  for (var i = 0; i < history.length - 1; i++) {
-    final msg = history[i];
-    if (msg.role != 'user') continue;
-
-    final prevNormalized = msg.content.toLowerCase().trim();
-    final prevKeywords = prevNormalized
-        .replaceAll(RegExp(r'\b(what|is|the|a|an|how|why|when|where|can|you|please|explain|tell|me|about)\b'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-
-    // Check for high similarity
-    if (keywords == prevKeywords ||
-        (keywords.length > 10 && prevKeywords.contains(keywords)) ||
-        (prevKeywords.length > 10 && keywords.contains(prevKeywords))) {
-      // Find the corresponding assistant response
-      for (var j = i + 1; j < history.length; j++) {
-        if (history[j].role == 'assistant') {
-          return history[j].content;
-        }
-      }
-    }
-  }
-  return null;
 }
 
 /// Android: GPU before CPU. CPU LiteRT often applies [TfLiteXNNPackDelegate], which has
@@ -317,12 +382,18 @@ List<PreferredBackend> _liteRtBackendsToTry({
 /// - Aggressive memory cleanup between inference calls
 /// - Minimal session caching to reduce memory footprint
 /// - History-aware prompt building with strict limits
+///
+/// NEW: Integrated ConversationMemoryManager for:
+/// - Memory tiering (working memory + summary)
+/// - Session isolation with UUID tracking
+/// - Optimized prompt construction (primacy-recency pattern)
+/// - Intelligent truncation at sentence boundaries
 class GemmaOfflineService {
   /// KV / context budget - REDUCED for 2GB RAM devices.
   /// Google AI Edge Gallery uses ~512 for low-memory devices.
   /// Higher values cause OOM crashes and LiteRT status 13 errors.
-  static const int _maxTokensLowRam = 384;  // For ≤3GB RAM
-  static const int _maxTokensHighRam = 512; // For >3GB RAM
+  static const int _maxTokensLowRam = 768;   // For ≤3GB RAM (increased)
+  static const int _maxTokensHighRam = 1024; // For >3GB RAM (increased)
 
   /// Actual max tokens used - set during initialization based on device RAM.
   int _effectiveMaxTokens = _maxTokensLowRam;
@@ -332,19 +403,33 @@ class GemmaOfflineService {
       'You are GyaanAi tutor.\n\nStudent: hi\n\nTeacher:';
 
   /// Lower topK = fewer candidates per step = faster sampling on-device.
-  /// SPEED: Reduced to 5 for maximum speed (quality stays good for education).
-  static const int _defaultTopK = 5;
+  /// SPEED: topK=3 for maximum speed (near-greedy, still good quality).
+  static const int _defaultTopK = 3;
 
-  /// Temperature for generation. 0.7 = good balance of speed and quality.
-  static const double _defaultTemperature = 0.7;
+  /// Temperature for generation. 0.5 = faster, more focused responses.
+  static const double _defaultTemperature = 0.5;
 
-  /// REDUCED prompt context for low-RAM devices.
-  static const int _maxPromptCharsLowRam = 1200;
-  static const int _maxPromptCharsHighRam = 1800;
+  /// Prompt context limits - AGGRESSIVE reduction for faster prefill.
+  /// Smaller prompts = faster time-to-first-token (less freeze).
+  /// Trade-off: less context, but much snappier response.
+  ///
+  /// OPTIMIZATION: Prefill freeze is ~proportional to prompt length.
+  /// 500 chars ≈ 0.5-1s prefill, 800 chars ≈ 1-2s, 1200 chars ≈ 2-3s
+  /// on a 2GHz device. Keeping prompts minimal for Class 7 level.
+  static const int _maxPromptCharsLowRam = 500;
+  static const int _maxPromptCharsHighRam = 700;
   int _effectiveMaxPromptChars = _maxPromptCharsLowRam;
 
-  /// Max output tokens - REDUCED for faster responses and less memory.
-  static const int _defaultMaxOutputTokens = 128;
+  /// Max output tokens - increased for more complete answers.
+  /// 512 tokens ≈ 350-400 words, good for Class 7 explanations.
+  static const int _defaultMaxOutputTokens = 512;
+
+  /// Inference timeout to prevent AI freezing.
+  /// If inference takes longer than this, we abort and return partial response.
+  static const Duration _inferenceTimeout = Duration(seconds: 60);
+
+  /// Prefill timeout - if model takes too long to start generating, abort.
+  static const Duration _prefillTimeout = Duration(seconds: 30);
 
   InferenceModel? _model;
   var _status = GemmaModelStatus.notFound;
@@ -369,6 +454,13 @@ class GemmaOfflineService {
 
   /// Whether this is a low-RAM device (≤3GB).
   bool get _isLowRamDevice => _deviceRamGb <= 3.0;
+
+  /// Conversation memory manager for intelligent context handling.
+  /// Uses memory tiering, session isolation, and optimized prompt construction.
+  late final ConversationMemoryManager _memoryManager;
+
+  /// Flag to track if memory manager is initialized.
+  bool _memoryManagerInitialized = false;
 
   bool get isReady => _model != null;
   bool get isLoaded => _model != null;
@@ -405,17 +497,33 @@ class GemmaOfflineService {
   }
 
   /// Get or create a conversation session for the given DB session ID.
+  /// CRITICAL: Now tracks grade/subject to detect cross-subject usage and prevent context bleeding.
   Future<_ConversationSession?> _getOrCreateSession(
     int sessionId, {
+    required int grade,
+    required String subject,
     List<ChatHistoryMessage>? initialHistory,
   }) async {
     if (_model == null) return null;
 
-    // Return existing session if available
+    // Check if existing session matches grade/subject
     if (_sessions.containsKey(sessionId)) {
       final session = _sessions[sessionId]!;
-      session.lastUsed = DateTime.now();
-      return session;
+
+      // CRITICAL: If grade/subject changed, invalidate and recreate!
+      // This prevents context bleeding between different subjects
+      if (!session.matches(grade, subject) || session.isDisposed) {
+        debugPrint('GemmaService: Session $sessionId grade/subject mismatch or disposed, recreating');
+        debugPrint('  Old: Grade ${session.grade} ${session.subject}');
+        debugPrint('  New: Grade $grade $subject');
+        final staleChat = session.takeChat();
+        _sessions.remove(sessionId);
+        await _closeNativeChat(staleChat);
+        // Fall through to create new session
+      } else {
+        session.lastUsed = DateTime.now();
+        return session;
+      }
     }
 
     // Cleanup old sessions if we have too many
@@ -423,10 +531,21 @@ class GemmaOfflineService {
       final oldest = _sessions.entries.reduce(
         (a, b) => a.value.lastUsed.isBefore(b.value.lastUsed) ? a : b,
       );
+      final evictedChat = oldest.value.takeChat();
       _sessions.remove(oldest.key);
+      await _closeNativeChat(evictedChat);
+      debugPrint('GemmaService: Evicted oldest session ${oldest.key}');
     }
 
-    // Create new chat session
+    // CRITICAL: Close the model's current native session before creating a new
+    // one. flutter_gemma's createSession() reuses its _createCompleter if it
+    // was never reset — meaning we'd silently get the OLD session back.
+    // Closing via _closeNativeChat() fires the onClose callback which nulls
+    // _createCompleter, so the next createChat() creates a truly fresh session.
+    final currentModelChat = (_model as dynamic).chat;
+    await _closeNativeChat(currentModelChat);
+
+    // Create new chat session with FRESH context
     try {
       final chat = await _model!.createChat(
         topK: _defaultTopK,
@@ -437,10 +556,21 @@ class GemmaOfflineService {
 
       final session = _ConversationSession(
         sessionId: sessionId,
+        grade: grade,
+        subject: subject,
         chat: chat,
         history: initialHistory,
       );
       _sessions[sessionId] = session;
+
+      // CRITICAL: Invalidate memory manager's KV cache for this session.
+      // Since we just created a fresh Chat object, any previous KV cache
+      // validity state is now stale and must be reset.
+      if (_memoryManagerInitialized) {
+        _memoryManager.invalidateKvCache(sessionId);
+      }
+
+      debugPrint('GemmaService: Created new session $sessionId for Grade $grade $subject (KV cache invalidated)');
       return session;
     } catch (e) {
       debugPrint('GemmaService: Failed to create session: $e');
@@ -449,19 +579,89 @@ class GemmaOfflineService {
   }
 
   /// Clear a specific conversation session (e.g., when chat is cleared).
+  /// Fire-and-forget closes the native session so flutter_gemma's
+  /// _createCompleter is reset for the next createChat() call.
   void clearSession(int sessionId) {
+    final session = _sessions[sessionId];
+    if (session != null) {
+      final chatObj = session.takeChat();
+      unawaited(_closeNativeChat(chatObj));
+    }
     _sessions.remove(sessionId);
+    if (_memoryManagerInitialized) {
+      _memoryManager.clearSession(sessionId);
+    }
+    debugPrint('GemmaService: Cleared session $sessionId');
   }
 
   /// Clear all conversation sessions.
   void clearAllSessions() {
+    for (final session in _sessions.values) {
+      final chatObj = session.takeChat();
+      unawaited(_closeNativeChat(chatObj));
+    }
     _sessions.clear();
+    if (_memoryManagerInitialized) {
+      _memoryManager.clearAllSessions();
+    }
+    debugPrint('GemmaService: Cleared all sessions');
   }
 
   /// Clear all sessions EXCEPT the specified one.
-  /// Use when switching to a different chat to prevent context bleeding.
   void clearOtherSessions(int keepSessionId) {
+    for (final entry in _sessions.entries) {
+      if (entry.key != keepSessionId) {
+        final chatObj = entry.value.takeChat();
+        unawaited(_closeNativeChat(chatObj));
+      }
+    }
     _sessions.removeWhere((key, _) => key != keepSessionId);
+    if (_memoryManagerInitialized) {
+      _memoryManager.isolateSession(keepSessionId);
+    }
+    debugPrint('GemmaService: Isolated session $keepSessionId');
+  }
+
+  /// Force invalidate a session if grade/subject changed.
+  void invalidateSessionIfMismatch(int sessionId, int grade, String subject) {
+    final session = _sessions[sessionId];
+    if (session != null && !session.matches(grade, subject)) {
+      debugPrint('GemmaService: Invalidating session $sessionId - grade/subject mismatch');
+      final chatObj = session.takeChat();
+      unawaited(_closeNativeChat(chatObj));
+      _sessions.remove(sessionId);
+      if (_memoryManagerInitialized) {
+        _memoryManager.clearSession(sessionId);
+      }
+    }
+  }
+
+  /// Close a flutter_gemma InferenceChat's native session.
+  ///
+  /// WHY THIS IS CRITICAL:
+  /// flutter_gemma's MobileInferenceModel stores a single `_createCompleter`.
+  /// That field is only set back to null when `session.close()` is called via
+  /// the `onClose` callback. If we merely null-out the Dart `chat` reference
+  /// (as the old `markDisposed()` did), `_createCompleter` keeps pointing at
+  /// the old completed Completer. The next `createChat()` call then hits the
+  /// guard:
+  ///   if (_createCompleter case Completer c) { return c.future; }
+  /// …and silently returns the OLD stale session — same KV cache, same subject
+  /// context — even though we think we created a brand-new chat.
+  ///
+  /// Calling `session.close()` on the InferenceChat resets `_createCompleter`
+  /// to null so the very next `createChat()` creates a truly fresh native
+  /// inference session with an empty KV cache.
+  Future<void> _closeNativeChat(dynamic chatObj) async {
+    if (chatObj == null) return;
+    try {
+      // InferenceChat.session is a public `late` field; close() resets the
+      // MobileInferenceModel's _createCompleter via the onClose callback.
+      await (chatObj as dynamic).session?.close();
+      debugPrint('GemmaService: Native session closed (KV cache reset)');
+    } catch (e) {
+      debugPrint('GemmaService: Native session close error (non-critical): $e');
+    }
   }
 
   Future<void> _releaseModelInstance() async {
@@ -476,41 +676,48 @@ class GemmaOfflineService {
 
   /// Detect device RAM and set adaptive token/context limits.
   /// Pattern from Google AI Edge Gallery: use minDeviceMemoryInGb thresholds.
+  ///
+  /// NOTE: ProcessInfo.maxRss returns app memory limit, NOT device RAM.
+  /// Since we can't reliably detect device RAM without a plugin, we use
+  /// platform-based heuristics. Most modern Android devices (2020+) have 4GB+.
   Future<void> _detectDeviceRamAndSetLimits() async {
     try {
-      // Try to get device RAM via ProcessInfo (available on mobile)
-      final rss = ProcessInfo.currentRss;
+      // ProcessInfo gives us app memory, not device RAM
+      // Use it as a hint: if app is allowed >1GB, device likely has 4GB+
       final maxRss = ProcessInfo.maxRss;
+      final maxRssGb = maxRss > 0 ? maxRss / (1024 * 1024 * 1024) : 0.0;
 
-      // Estimate total RAM from maxRss (rough heuristic)
-      // On Android/iOS, maxRss is often limited but gives us a hint
-      if (maxRss > 0) {
-        // Convert bytes to GB
-        _deviceRamGb = maxRss / (1024 * 1024 * 1024);
-        // If maxRss is unreasonably small, use a floor
-        if (_deviceRamGb < 1.0) _deviceRamGb = 2.0;
-        // Cap at reasonable max for heuristic
-        if (_deviceRamGb > 16.0) _deviceRamGb = 4.0;
+      // Heuristic: Android gives apps roughly 25-50% of device RAM
+      // If maxRss > 1GB, device likely has 4GB+ RAM
+      // If maxRss > 512MB, device likely has 3GB+ RAM
+      if (maxRssGb >= 1.0) {
+        _deviceRamGb = 6.0; // Assume high-RAM device
+      } else if (maxRssGb >= 0.5) {
+        _deviceRamGb = 4.0; // Assume mid-RAM device
+      } else if (maxRssGb > 0) {
+        _deviceRamGb = 3.0; // Conservative estimate
       } else {
-        // Default to conservative low-RAM assumption
-        _deviceRamGb = 2.0;
+        // If we can't detect, assume modern device with decent RAM
+        // Most devices running this app (2020+) have at least 4GB
+        _deviceRamGb = 4.0;
       }
 
-      debugPrint('GemmaService: Detected ~${_deviceRamGb.toStringAsFixed(1)}GB RAM (rss=$rss, maxRss=$maxRss)');
+      debugPrint('GemmaService: RAM heuristic: ~${_deviceRamGb.toStringAsFixed(1)}GB (app maxRss=${maxRssGb.toStringAsFixed(2)}GB)');
     } catch (e) {
-      // If ProcessInfo fails, assume low RAM for safety
-      _deviceRamGb = 2.0;
-      debugPrint('GemmaService: RAM detection failed, assuming 2GB: $e');
+      // Default to standard settings for modern devices
+      _deviceRamGb = 4.0;
+      debugPrint('GemmaService: RAM detection failed, assuming 4GB modern device: $e');
     }
 
-    // Set adaptive limits based on detected RAM
+    // Set adaptive limits based on estimated RAM
+    // OPTIMIZATION: Use smaller prompts even on high-RAM to reduce prefill freeze
     if (_deviceRamGb <= 3.0) {
-      // Low RAM device: use minimal settings
+      // Low RAM device: minimal settings
       _effectiveMaxTokens = _maxTokensLowRam;
       _effectiveMaxPromptChars = _maxPromptCharsLowRam;
       debugPrint('GemmaService: Using LOW-RAM settings (maxTokens=$_effectiveMaxTokens, maxPromptChars=$_effectiveMaxPromptChars)');
     } else {
-      // Higher RAM device: can use slightly more context
+      // Standard/High RAM device
       _effectiveMaxTokens = _maxTokensHighRam;
       _effectiveMaxPromptChars = _maxPromptCharsHighRam;
       debugPrint('GemmaService: Using STANDARD settings (maxTokens=$_effectiveMaxTokens, maxPromptChars=$_effectiveMaxPromptChars)');
@@ -543,6 +750,15 @@ class GemmaOfflineService {
 
     // Detect device RAM and set adaptive limits (Google AI Edge Gallery pattern)
     await _detectDeviceRamAndSetLimits();
+
+    // Initialize memory manager with appropriate config
+    if (!_memoryManagerInitialized) {
+      _memoryManager = ConversationMemoryManager(
+        config: _isLowRamDevice ? MemoryConfig.lowRam : MemoryConfig.standard,
+      );
+      _memoryManagerInitialized = true;
+      debugPrint('GemmaService: Memory manager initialized (${_isLowRamDevice ? "low-RAM" : "standard"} config)');
+    }
 
     try {
       final path = await ModelManager.findModel();
@@ -697,14 +913,23 @@ class GemmaOfflineService {
 
           // KEY OPTIMIZATION: Reuse session chat with KV cache (like Google does)
           dynamic chat;
-          bool isNewSession = false;
+          bool isFreshChat = false;  // True if Chat object was just created (empty KV cache)
           _ConversationSession? session;
 
           if (sessionId != null) {
-            session = await _getOrCreateSession(sessionId, initialHistory: history);
+            session = await _getOrCreateSession(
+              sessionId,
+              grade: grade,
+              subject: subjectEnglish,
+              initialHistory: history,
+            );
             if (session != null) {
               chat = session.chat;
-              isNewSession = session.history.isEmpty;
+              // CRITICAL FIX: Use isChatFresh instead of history.isEmpty!
+              // A session can have history from DB but a fresh Chat object (empty KV cache).
+              // Using history.isEmpty caused context bleeding because it would skip
+              // full context rebuild when history existed but KV cache was empty.
+              isFreshChat = session.isChatFresh;
             }
           }
 
@@ -716,49 +941,132 @@ class GemmaOfflineService {
               isThinking: false,
               modelType: ModelType.gemmaIt,
             );
-            isNewSession = true;
+            isFreshChat = true;
           }
 
-          // CRITICAL SPEED FIX:
-          // - New session: send full prompt with system context (first turn)
-          // - Existing session: send ONLY user message (KV cache has context!)
-          // This is what makes Google's app faster - they reuse the KV cache
+          // CONTEXT MANAGEMENT using ConversationMemoryManager:
+          // - Memory tiering: working memory (verbatim) + summary (compressed)
+          // - Primacy-recency pattern: system at start, recent context at end
+          // - Intelligent sentence-boundary truncation
+          // - Session isolation with UUID tracking
+          //
+          // Key insight: When app restarts, KV cache is lost but DB has history.
+          // The memory manager handles rebuilding context efficiently.
           String promptToSend;
-          if (isNewSession) {
-            // First turn: include system prompt and context
+          final hasDbHistory = history != null && history.isNotEmpty;
+          final hasSessionHistory = session != null && session.history.isNotEmpty;
+          final isContinuation = _isContinuationRequest(userMessage);
+
+          // Use memory manager for intelligent context building
+          if (_memoryManagerInitialized && sessionId != null) {
+            final system = systemPrompt ??
+                buildGyaanAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
+
+            // Check if we can reuse KV cache (fast path)
+            // CRITICAL: Must NOT be a fresh chat AND KV cache must be valid AND session grade/subject must still match
+            final kvCacheValid = _memoryManager.isKvCacheValid(sessionId);
+            final sessionMatchesContext = session != null && session.matches(grade, subjectEnglish);
+
+            if (!isFreshChat && hasSessionHistory && !isContinuation && kvCacheValid && sessionMatchesContext) {
+              // FAST PATH: KV cache active, just send new message
+              // This is 2-3x faster! (Skip prefill of system+history tokens)
+              promptToSend = userMessage.trim();
+              if (promptToSend.length > 600) {
+                promptToSend = '${promptToSend.substring(0, 600)}…';
+              }
+              debugPrint('GemmaService: REUSING KV cache - sending only user message (${promptToSend.length} chars)');
+            } else {
+              // Use memory manager for intelligent context building
+              // This handles: DB rebuild, continuation, new session, all paths
+              promptToSend = _memoryManager.buildPromptWithContext(
+                sessionId: sessionId,
+                grade: grade,
+                subject: subjectEnglish,
+                systemPrompt: system,
+                userMessage: userMessage,
+                dbHistory: history,
+              );
+
+              // Mark KV cache as valid after full context build
+              _memoryManager.markKvCacheValid(sessionId);
+
+              // Mark the Chat object as used (no longer fresh)
+              session?.markChatUsed();
+
+              final pathType = isFreshChat
+                  ? (hasDbHistory ? 'REBUILD from DB' : 'NEW session')
+                  : (isContinuation ? 'CONTINUATION' : 'CONTEXT refresh');
+              debugPrint('GemmaService: $pathType via MemoryManager (${promptToSend.length} chars)');
+            }
+          } else {
+            // Fallback to legacy prompt building (no session ID)
             promptToSend = _buildOfflineInferencePrompt(
               grade: grade,
               subjectEnglish: subjectEnglish,
               userMessage: userMessage,
               systemPrompt: systemPrompt,
               maxChars: _effectiveMaxPromptChars,
-              history: null, // No history needed - it's the first turn
+              history: history,
+              isLowRamDevice: _isLowRamDevice,
             );
-            debugPrint('GemmaService: NEW session - sending full prompt (${promptToSend.length} chars)');
-          } else {
-            // Subsequent turns: KV cache already has context, just send new message
-            // This is 2-3x faster! (Skip prefill of system+history tokens)
-            promptToSend = userMessage.trim();
-            if (promptToSend.length > 500) {
-              promptToSend = '${promptToSend.substring(0, 500)}…';
-            }
-            debugPrint('GemmaService: REUSING KV cache - sending only user message (${promptToSend.length} chars)');
+            debugPrint('GemmaService: LEGACY prompt building (${promptToSend.length} chars)');
           }
 
-          await chat.addQueryChunk(Message.text(text: promptToSend, isUser: true));
+          // Signal that we're starting prefill (UI can show "preparing...")
+          // This prevents the "freeze" feeling - user sees immediate feedback
+          debugPrint('GemmaService: Starting prefill (${promptToSend.length} chars)...');
+
+          // Add prefill timeout to prevent freezing during model preparation
+          try {
+            await chat.addQueryChunk(Message.text(text: promptToSend, isUser: true))
+                .timeout(_prefillTimeout, onTimeout: () {
+              throw TimeoutException('Model prefill took too long', _prefillTimeout);
+            });
+          } on TimeoutException catch (e) {
+            debugPrint('GemmaService: Prefill timeout: $e');
+            yield 'Response timed out during preparation. Please try again with a shorter message.';
+            return;
+          }
+
           final prefillMs = sw.elapsedMilliseconds;
-          debugPrint('GemmaService: prefill ${prefillMs}ms');
+          debugPrint('GemmaService: prefill ${prefillMs}ms (prompt: ${promptToSend.length} chars)');
 
           var acc = '';
           var tokenCount = 0;
           // SPEED: Yield every token for smoother word-by-word display
           const yieldEveryNTokens = 1;
 
+          // Track last token time for stall detection
+          var lastTokenTime = DateTime.now();
+          const stallThreshold = Duration(seconds: 15);
+
           await for (final response in chat.generateChatResponseAsync()) {
+            // Check for inference timeout
+            if (sw.elapsed > _inferenceTimeout) {
+              debugPrint('GemmaService: Inference timeout after ${sw.elapsedMilliseconds}ms');
+              if (acc.isNotEmpty) {
+                yield '$acc\n\n(Response truncated due to time limit)';
+              } else {
+                yield 'Response timed out. Please try again with a simpler question.';
+              }
+              return;
+            }
+
+            // Check for stall (no tokens for too long)
+            final now = DateTime.now();
+            if (now.difference(lastTokenTime) > stallThreshold && tokenCount > 0) {
+              debugPrint('GemmaService: Generation stalled after $tokenCount tokens');
+              if (acc.isNotEmpty) {
+                yield '$acc\n\n(Generation stopped - model stalled)';
+              }
+              return;
+            }
+
             if (response is TextResponse) {
               if (response.token.isEmpty) continue;
               acc += response.token;
               tokenCount++;
+              lastTokenTime = now;
               // Yield every N tokens - simpler and faster than DateTime checks
               if (tokenCount % yieldEveryNTokens == 0 || tokenCount >= outCap) {
                 yield acc;
@@ -786,6 +1094,30 @@ class GemmaOfflineService {
               content: acc,
               timestamp: DateTime.now(),
             ));
+          }
+
+          // Also update memory manager with the new messages
+          if (_memoryManagerInitialized && sessionId != null) {
+            _memoryManager.addMessage(
+              sessionId: sessionId,
+              message: ChatHistoryMessage(
+                role: 'user',
+                content: userMessage,
+                timestamp: DateTime.now(),
+              ),
+              grade: grade,
+              subject: subjectEnglish,
+            );
+            _memoryManager.addMessage(
+              sessionId: sessionId,
+              message: ChatHistoryMessage(
+                role: 'assistant',
+                content: acc,
+                timestamp: DateTime.now(),
+              ),
+              grade: grade,
+              subject: subjectEnglish,
+            );
           }
 
           if (acc.trim().isEmpty) {

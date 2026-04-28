@@ -6,7 +6,7 @@ class AppSettingsService {
   static const _kOllamaHost = 'ollama_host';
 
   /// Full Ollama API base for GyaanAi, e.g. `http://192.168.1.5:11434` (no trailing slash).
-  static const _kPadhOllamaBaseUrl = 'padh_ollama_base_url';
+  static const _kGyaanOllamaBaseUrl = 'gyaan_ollama_base_url';
   static const _kDjangoBaseUrl = 'django_base_url';
   static const _kAccessToken = 'jwt_access';
   static const _kRefreshToken = 'jwt_refresh';
@@ -27,22 +27,22 @@ class AppSettingsService {
       _prefs.setString(_kOllamaHost, v.trim());
 
   /// User override for GyaanAi → Ollama. `null` or empty = use platform default.
-  String? get padhOllamaBaseUrlOverride =>
-      _prefs.getString(_kPadhOllamaBaseUrl);
+  String? get gyaanOllamaBaseUrlOverride =>
+      _prefs.getString(_kGyaanOllamaBaseUrl);
 
-  Future<void> setPadhOllamaBaseUrl(String? value) async {
+  Future<void> setGyaanOllamaBaseUrl(String? value) async {
     if (value == null || value.trim().isEmpty) {
-      await _prefs.remove(_kPadhOllamaBaseUrl);
+      await _prefs.remove(_kGyaanOllamaBaseUrl);
     } else {
       await _prefs.setString(
-        _kPadhOllamaBaseUrl,
-        normalizePadhOllamaBaseUrl(value),
+        _kGyaanOllamaBaseUrl,
+        normalizeGyaanOllamaBaseUrl(value),
       );
     }
   }
 
   /// Ensures `http://` and no trailing slash.
-  static String normalizePadhOllamaBaseUrl(String raw) {
+  static String normalizeGyaanOllamaBaseUrl(String raw) {
     var s = raw.trim();
     if (s.isEmpty) return s;
     if (!s.startsWith('http://') && !s.startsWith('https://')) {

@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../navigation/slide_route.dart';
-import '../providers/padh_ai_providers.dart';
+import '../providers/gyaan_ai_providers.dart';
 import '../screens/auth/login_screen.dart';
-import '../screens/padh_settings_screen.dart';
+import '../screens/gyaan_ai_settings_screen.dart';
 import '../screens/profile_screen.dart';
-import '../theme/padh_ai_theme.dart';
+import '../theme/gyaan_ai_theme.dart';
 
 /// App bar menu: Settings, Profile / Sign in, Log out.
-class PadhAccountMenuButton extends ConsumerWidget {
-  const PadhAccountMenuButton({super.key});
+class GyaanAiAccountMenuButton extends ConsumerWidget {
+  const GyaanAiAccountMenuButton({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -21,13 +21,13 @@ class PadhAccountMenuButton extends ConsumerWidget {
     return PopupMenuButton<String>(
       icon: Icon(
         loggedIn ? Icons.account_circle : Icons.account_circle_outlined,
-        color: PadhAiColors.primary,
+        color: GyaanAiColors.primary,
       ),
       tooltip: 'Account',
       onSelected: (value) async {
         if (value == 'settings') {
           await Navigator.of(context).push(
-            slideFromRight(const PadhSettingsScreen()),
+            slideFromRight(const GyaanAiSettingsScreen()),
           );
           return;
         }

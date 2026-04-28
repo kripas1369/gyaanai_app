@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/subject_catalog.dart';
 import '../navigation/slide_route.dart';
-import '../theme/padh_ai_theme.dart';
-import '../widgets/padh_account_menu_button.dart';
+import '../theme/gyaan_ai_theme.dart';
+import '../widgets/gyaan_ai_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
+import 'chat_history_screen.dart';
 import 'local_model_test_screen.dart';
 import 'subject_selection_screen.dart';
 
@@ -18,7 +21,7 @@ class GradeSelectionScreen extends ConsumerStatefulWidget {
 }
 
 class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
-  static const _prefsKey = 'padh_last_grade';
+  static const _prefsKey = 'gyaan_last_grade';
   int? _highlightGrade;
 
   @override
@@ -66,6 +69,82 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
     );
   }
 
+  Widget _generalAiTile() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          HapticFeedback.lightImpact();
+          Navigator.of(context).push(
+            slideFromRight(
+              ChatHistoryScreen(grade: 0, subject: generalSubject),
+            ),
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Text('🤖', style: TextStyle(fontSize: 24)),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'General AI',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    Text(
+                      'Ask anything • सामान्य प्रश्न',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white.withValues(alpha: 0.8),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _gradeTile(int grade, {bool wide = false}) {
     final (bg, fg, emoji) = _styleForGrade(grade);
     final highlight = _highlightGrade == grade;
@@ -74,6 +153,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () async {
+          HapticFeedback.selectionClick();
           await _saveGrade(grade);
           if (!mounted) return;
           Navigator.of(context).push(
@@ -90,7 +170,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
             color: bg,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: highlight ? PadhAiColors.accent : fg.withValues(alpha: 0.2),
+              color: highlight ? GyaanAiColors.accent : fg.withValues(alpha: 0.2),
               width: highlight ? 2.5 : 1,
             ),
             boxShadow: [
@@ -120,7 +200,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
                           Text(
                             'Class $grade',
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: PadhAiColors.textSecondary,
+                                  color: GyaanAiColors.textSecondary,
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
@@ -131,7 +211,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: PadhAiColors.accent.withValues(alpha: 0.25),
+                              color: GyaanAiColors.accent.withValues(alpha: 0.25),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
@@ -163,7 +243,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
                     Text(
                       'Class $grade',
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                            color: PadhAiColors.textSecondary,
+                            color: GyaanAiColors.textSecondary,
                             fontWeight: FontWeight.w600,
                           ),
                     ),
@@ -180,7 +260,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
       appBar: AppBar(
         title: const Text('GyaanAi'),
         actions: [
-          const PadhAccountMenuButton(),
+          const GyaanAiAccountMenuButton(),
           IconButton(
             tooltip: 'Bundled model test',
             icon: const Icon(Icons.memory_rounded),
@@ -204,7 +284,7 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: PadhAiColors.textPrimary,
+                    color: GyaanAiColors.textPrimary,
                   ),
             ),
             const SizedBox(height: 6),
@@ -212,10 +292,13 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen> {
               'Choose Your Class',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: PadhAiColors.textSecondary,
+                    color: GyaanAiColors.textSecondary,
                   ),
             ),
             const SizedBox(height: 20),
+            // General AI - Ask anything
+            _generalAiTile(),
+            const SizedBox(height: 16),
             GridView.count(
               crossAxisCount: 3,
               shrinkWrap: true,

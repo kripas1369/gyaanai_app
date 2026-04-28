@@ -1,7 +1,7 @@
 import '../../data/services/local_db_service.dart';
 
-class PadhAiChatRepository {
-  PadhAiChatRepository(this._db);
+class GyaanAiChatRepository {
+  GyaanAiChatRepository(this._db);
 
   final LocalDbService _db;
 
@@ -64,7 +64,31 @@ class PadhAiChatRepository {
     return _db.deleteMessagesForSession(sessionId);
   }
 
+  Future<void> deleteMessage(int messageId) {
+    return _db.deleteMessage(messageId);
+  }
+
+  Future<void> updateMessage(int messageId, String content) {
+    return _db.updateMessageContent(messageId, content);
+  }
+
   Future<String?> lastPreview(int sessionId) {
     return _db.getLastMessagePreview(sessionId);
+  }
+
+  Future<void> deleteSession(int sessionId) {
+    return _db.deleteChatSession(sessionId);
+  }
+
+  Future<int> messageCountForSession(int sessionId) async {
+    final messages = await _db.getMessagesForSession(sessionId);
+    return messages.length;
+  }
+
+  Future<void> deleteAllSessionsForGradeSubject(int grade, String subjectKey) async {
+    final sessions = await _db.getChatSessionsForGradeSubject(grade, subjectKey);
+    for (final s in sessions) {
+      await _db.deleteChatSession(s['id'] as int);
+    }
   }
 }

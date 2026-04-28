@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../providers/padh_ai_providers.dart';
+import '../providers/gyaan_ai_providers.dart';
 import '../services/gemma_offline_service.dart';
-import '../theme/padh_ai_theme.dart';
+import '../theme/gyaan_ai_theme.dart';
 import '../widgets/scaffold_with_banner.dart';
 
 class LocalModelTestScreen extends ConsumerStatefulWidget {
@@ -55,19 +55,19 @@ class _LocalModelTestScreenState extends ConsumerState<LocalModelTestScreen> {
             Text(
               'Copies the bundled Gemma 4 `.litertlm` into app storage (flutter_gemma / LiteRT-LM), same as chat.',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: PadhAiColors.textSecondary,
+                    color: GyaanAiColors.textSecondary,
                   ),
             ),
             const SizedBox(height: 10),
             Material(
-              color: PadhAiColors.accent.withValues(alpha: 0.14),
+              color: GyaanAiColors.accent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   'Large models (~2GB+) need free disk space and RAM; first load can be slow.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: PadhAiColors.textSecondary,
+                        color: GyaanAiColors.textSecondary,
                         height: 1.35,
                       ),
                 ),

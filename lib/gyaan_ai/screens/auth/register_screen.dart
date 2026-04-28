@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/services/api_service.dart';
 import '../../navigation/slide_route.dart';
-import '../../providers/padh_ai_providers.dart';
-import '../../theme/padh_ai_theme.dart';
+import '../../providers/gyaan_ai_providers.dart';
+import '../../theme/gyaan_ai_theme.dart';
 import '../grade_selection_screen.dart';
-import '../padh_settings_screen.dart';
+import '../gyaan_ai_settings_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -65,7 +65,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Account created! Welcome to GyaanAi.'),
-          backgroundColor: PadhAiColors.secondary,
+          backgroundColor: GyaanAiColors.secondary,
         ),
       );
       Navigator.of(context).pushReplacement(
@@ -104,12 +104,12 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PadhAiColors.background,
+      backgroundColor: GyaanAiColors.background,
       appBar: AppBar(
         title: const Text('Create Account'),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: PadhAiColors.primary,
+        foregroundColor: GyaanAiColors.primary,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -123,13 +123,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   'Student Registration',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
-                        color: PadhAiColors.primary,
+                        color: GyaanAiColors.primary,
                       ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'Fill in your details to get started.',
-                  style: TextStyle(color: PadhAiColors.textSecondary),
+                  style: TextStyle(color: GyaanAiColors.textSecondary),
                 ),
                 const SizedBox(height: 24),
 
@@ -272,7 +272,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   child: FilledButton(
                     onPressed: _isLoading ? null : _register,
                     style: FilledButton.styleFrom(
-                      backgroundColor: PadhAiColors.primary,
+                      backgroundColor: GyaanAiColors.primary,
                     ),
                     child: _isLoading
                         ? const SizedBox(
@@ -297,7 +297,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   onPressed: _isLoading
                       ? null
                       : () => Navigator.of(context).push(
-                            slideFromRight(const PadhSettingsScreen()),
+                            slideFromRight(const GyaanAiSettingsScreen()),
                           ),
                   icon: const Icon(Icons.dns_outlined, size: 18),
                   label: const Text('Server settings'),
@@ -310,14 +310,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   children: [
                     Text(
                       'Already have an account? ',
-                      style: TextStyle(color: PadhAiColors.textSecondary),
+                      style: TextStyle(color: GyaanAiColors.textSecondary),
                     ),
                     GestureDetector(
                       onTap: _isLoading ? null : () => Navigator.of(context).pop(),
                       child: Text(
                         'Login',
                         style: TextStyle(
-                          color: PadhAiColors.primary,
+                          color: GyaanAiColors.primary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),

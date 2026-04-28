@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../../data/services/app_settings_service.dart';
 import 'gemma_offline_service.dart';
-import 'padh_ai_system_prompt.dart';
+import 'gyaan_ai_system_prompt.dart';
 
 // Re-export ChatHistoryMessage for use in chat screen
 export 'gemma_offline_service.dart' show ChatHistoryMessage;
@@ -52,7 +52,7 @@ class HybridAiService {
   AiMode? _lastMode;
 
   static const _connectivityCacheDuration = Duration(seconds: 30);
-  static const _healthCheckTimeout = Duration(milliseconds: 900);
+  static const _healthCheckTimeout = Duration(milliseconds: 400);
   static const _negativeCacheAfterFailure = Duration(seconds: 90);
 
   /// The base URL used for all Django HTTP calls (already Android-rewritten).
@@ -231,6 +231,20 @@ class HybridAiService {
       return;
     }
 
+    // SPEED OPTIMIZATION: If offline model is already loaded, use it immediately
+    // to skip network latency entirely. This makes responses much faster.
+    if (gemmaService.isReady) {
+      yield* _runOfflineInference(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+        sessionId: sessionId,
+        history: history,
+      );
+      return;
+    }
+
     // Optimistic online-first: avoids waiting on `/api/ai/health/` per message.
     // If online fails quickly, we transparently fall back to offline.
     var producedAnyToken = false;
@@ -240,6 +254,7 @@ class HybridAiService {
         subjectEnglish: subjectEnglish,
         userMessage: userMessage,
         systemPrompt: systemPrompt,
+        history: history,
       )) {
         producedAnyToken = true;
         yield acc;
@@ -318,14 +333,16 @@ class HybridAiService {
   }
 
   /// Online inference via Django → Ollama SSE streaming.
+  /// Now includes conversation history for context-aware responses.
   Stream<String> _runOnlineInference({
     required int grade,
     required String subjectEnglish,
     required String userMessage,
     String? systemPrompt,
+    List<ChatHistoryMessage>? history,
   }) async* {
     final system = systemPrompt ??
-        buildPadhAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
+        buildGyaanAiSystemPrompt(grade: grade, subjectEnglish: subjectEnglish);
 
     final uri = Uri.parse('$_baseUrl/api/ai/chat/stream/');
 
@@ -340,11 +357,18 @@ class HybridAiService {
         request.headers['Authorization'] = 'Bearer $token';
       }
 
+      // Build history for Django/Ollama (same format as ChatGPT API)
+      final historyJson = history?.map((m) => {
+        'role': m.role,
+        'content': m.content,
+      }).toList();
+
       request.body = jsonEncode({
         'grade': grade,
         'subject': subjectEnglish,
         'message': userMessage,
         'system_prompt': system,
+        if (historyJson != null && historyJson.isNotEmpty) 'history': historyJson,
       });
 
       client = http.Client();

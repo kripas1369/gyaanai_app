@@ -3,10 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/services/api_service.dart';
 import '../navigation/slide_route.dart';
-import '../providers/padh_ai_providers.dart';
-import '../theme/padh_ai_theme.dart';
+import '../providers/gyaan_ai_providers.dart';
+import '../theme/gyaan_ai_theme.dart';
 import 'auth/login_screen.dart';
-import 'padh_settings_screen.dart';
+import 'gyaan_ai_settings_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -100,17 +100,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PadhAiColors.background,
+      backgroundColor: GyaanAiColors.background,
       appBar: AppBar(
         title: const Text('Profile'),
-        backgroundColor: PadhAiColors.background,
-        foregroundColor: PadhAiColors.primary,
+        backgroundColor: GyaanAiColors.background,
+        foregroundColor: GyaanAiColors.primary,
         actions: [
           IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
-              slideFromRight(const PadhSettingsScreen()),
+              slideFromRight(const GyaanAiSettingsScreen()),
             ),
           ),
         ],
@@ -150,7 +150,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Icon(
               Icons.person_outline_rounded,
               size: 64,
-              color: PadhAiColors.textSecondary.withValues(alpha: 0.5),
+              color: GyaanAiColors.textSecondary.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -163,7 +163,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             Text(
               'Sign in to save your profile and use server features.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: PadhAiColors.textSecondary),
+              style: TextStyle(color: GyaanAiColors.textSecondary),
             ),
             const SizedBox(height: 24),
             FilledButton(
@@ -171,7 +171,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 slideFromRight(const LoginScreen()),
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: PadhAiColors.primary,
+                backgroundColor: GyaanAiColors.primary,
                 minimumSize: const Size.fromHeight(48),
               ),
               child: const Text('Sign in'),
@@ -203,13 +203,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       children: [
         CircleAvatar(
           radius: 40,
-          backgroundColor: PadhAiColors.primary.withValues(alpha: 0.15),
+          backgroundColor: GyaanAiColors.primary.withValues(alpha: 0.15),
           child: Text(
             username.isNotEmpty ? username[0].toUpperCase() : '?',
             style: const TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.w800,
-              color: PadhAiColors.primary,
+              color: GyaanAiColors.primary,
             ),
           ),
         ),
@@ -226,7 +226,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           Text(
             username,
             textAlign: TextAlign.center,
-            style: TextStyle(color: PadhAiColors.textSecondary),
+            style: TextStyle(color: GyaanAiColors.textSecondary),
           ),
         ],
         const SizedBox(height: 24),
@@ -236,7 +236,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         const SizedBox(height: 32),
         OutlinedButton.icon(
           onPressed: () => Navigator.of(context).push(
-            slideFromRight(const PadhSettingsScreen()),
+            slideFromRight(const GyaanAiSettingsScreen()),
           ),
           icon: const Icon(Icons.settings),
           label: const Text('App settings'),
@@ -264,14 +264,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       padding: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         contentPadding: EdgeInsets.zero,
-        leading: Icon(icon, color: PadhAiColors.secondary),
-        title: Text(label, style: TextStyle(color: PadhAiColors.textSecondary, fontSize: 13)),
+        leading: Icon(icon, color: GyaanAiColors.secondary),
+        title: Text(label, style: TextStyle(color: GyaanAiColors.textSecondary, fontSize: 13)),
         subtitle: Text(
           value,
           style: const TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
-            color: PadhAiColors.textPrimary,
+            color: GyaanAiColors.textPrimary,
           ),
         ),
       ),

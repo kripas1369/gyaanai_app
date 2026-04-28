@@ -5,11 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/api_service.dart';
 import '../../data/services/app_settings_service.dart';
 import '../../data/services/local_db_service.dart';
+import '../services/conversation_memory_manager.dart';
 import '../services/gemma_offline_service.dart';
 import '../services/hybrid_ai_service.dart';
 import '../services/model_loader_service.dart';
 import '../services/offline_task_sync_service.dart';
-import '../services/padh_ai_chat_repository.dart';
+import '../services/gyaan_ai_chat_repository.dart';
 
 /// Injected in [main] via [ProviderScope.overrides].
 final localDbProvider = Provider<LocalDbService>((ref) {
@@ -79,27 +80,35 @@ final gemmaStatusProvider = StreamProvider<GemmaModelStatus>((ref) {
   return gemma.statusStream;
 });
 
-final padhChatRepoProvider = Provider<PadhAiChatRepository>(
-  (ref) => PadhAiChatRepository(ref.watch(localDbProvider)),
+final gyaanAiChatRepoProvider = Provider<GyaanAiChatRepository>(
+  (ref) => GyaanAiChatRepository(ref.watch(localDbProvider)),
 );
 
-enum PadhConnectivityLabel { online, offlineLocal }
+/// Conversation memory manager for intelligent context handling.
+/// Shared instance for session info queries and manual context control.
+/// Note: GemmaOfflineService has its own internal memory manager that's
+/// automatically synced during inference.
+final conversationMemoryProvider = Provider<ConversationMemoryManager>((ref) {
+  return ConversationMemoryManager(config: MemoryConfig.standard);
+});
 
-final padhConnectivityProvider =
-    StreamProvider<PadhConnectivityLabel>((ref) async* {
+enum GyaanAiConnectivityLabel { online, offlineLocal }
+
+final gyaanAiConnectivityProvider =
+    StreamProvider<GyaanAiConnectivityLabel>((ref) async* {
   final connectivity = Connectivity();
   final hybrid = ref.watch(hybridAiProvider);
 
-  Future<PadhConnectivityLabel> read() async {
+  Future<GyaanAiConnectivityLabel> read() async {
     final list = await connectivity.checkConnectivity();
     final has = list.any((r) => r != ConnectivityResult.none);
-    if (!has) return PadhConnectivityLabel.offlineLocal;
+    if (!has) return GyaanAiConnectivityLabel.offlineLocal;
 
     // Network is present; "online" means Django is actually reachable.
     final ok = await hybrid.refreshConnectivity();
     return ok == AiMode.online
-        ? PadhConnectivityLabel.online
-        : PadhConnectivityLabel.offlineLocal;
+        ? GyaanAiConnectivityLabel.online
+        : GyaanAiConnectivityLabel.offlineLocal;
   }
 
   yield await read();

@@ -5,9 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'data/services/app_settings_service.dart';
 import 'data/services/local_db_service.dart';
-import 'padh_ai/providers/padh_ai_providers.dart';
-import 'padh_ai/screens/splash_screen.dart';
-import 'padh_ai/theme/padh_ai_theme.dart';
+import 'gyaan_ai/providers/gyaan_ai_providers.dart';
+import 'gyaan_ai/screens/splash_screen.dart';
+import 'gyaan_ai/theme/gyaan_ai_theme.dart';
 
 /// Global container reference for memory pressure handling
 ProviderContainer? _globalContainer;
@@ -83,8 +83,8 @@ class _GyaanAppState extends State<GyaanApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'GyaanAi',
-      theme: padhAiLightTheme(),
-      darkTheme: padhAiDarkTheme(),
+      theme: gyaanAiLightTheme(),
+      darkTheme: gyaanAiDarkTheme(),
       themeMode: ThemeMode.system,
       home: const SplashScreen(),
       debugShowCheckedModeBanner: false,

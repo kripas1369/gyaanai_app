@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(flutter clean:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(flutter build:*)",
+      "Bash(flutter analyze:*)",
+      "Bash(python manage.py:*)",
+      "Bash(source:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(while pgrep -x gzip)",
+      "Bash(do sleep 2)",
+      "Bash(done)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:ai.google.dev)",
+      "WebSearch",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nperf: optimize AI response speed and fix context bleeding bug\n\n- Stream tokens word-by-word \\(yieldEveryNTokens: 3→1\\) for smoother display\n- Add translator package for fast Nepali/English translation \\(no AI needed\\)\n- Fix chat context bleeding: clear other Gemma sessions on chat load\n- Remove 1.8s forced splash delays for instant app startup\n- Remove redundant model loading in chat screen\n- Remove background warmup that competed with user inference\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebFetch(domain:api.github.com)"
+    ]
+  }
+}

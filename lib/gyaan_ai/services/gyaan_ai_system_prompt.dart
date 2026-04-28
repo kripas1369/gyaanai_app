@@ -1,11 +1,27 @@
 /// Builds the hidden system instruction for offline Gemma model.
 /// Kept as short as possible — every extra character costs prefill time on-device.
-String buildPadhAiSystemPrompt({
+///
+/// IMPORTANT: System prompt explicitly states current grade/subject to prevent
+/// context bleeding from previous conversations.
+String buildGyaanAiSystemPrompt({
   required int grade,
   required String subjectEnglish,
 }) {
+  // General mode (grade=0) - answer any question
+  if (grade == 0 || subjectEnglish.toLowerCase() == 'general') {
+    return '[NEW CONVERSATION] You are GyaanAi, helpful AI assistant. '
+        'Ignore any previous conversation context. '
+        'User may ask in English or Nepali. '
+        'Reply in English only — no Devanagari. '
+        'Be helpful, accurate, concise. '
+        'For math: show steps + answer. '
+        'For code: give working examples.';
+  }
+
   final see = grade >= 9 ? ' (SEE prep)' : '';
-  return 'You are GyaanAi, AI tutor for Class $grade $subjectEnglish$see. '
+  return '[NEW CONVERSATION - Class $grade $subjectEnglish] '
+      'You are GyaanAi, AI tutor ONLY for Class $grade $subjectEnglish$see. '
+      'Ignore any previous conversation about other subjects or grades. '
       'Student may ask in English or Nepali (or mixed). '
       'Reply in English only — no Devanagari, no Nepali sentences in your reply. '
       'Use Nepal-relevant examples when helpful. '

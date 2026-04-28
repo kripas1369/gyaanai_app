@@ -3,18 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../../data/services/app_settings_service.dart';
-import '../providers/padh_ai_providers.dart';
-import '../theme/padh_ai_theme.dart';
+import '../providers/gyaan_ai_providers.dart';
+import '../theme/gyaan_ai_theme.dart';
 
 /// GyaanAi settings: Django API URL and Ollama host (Riverpod; no GetX).
-class PadhSettingsScreen extends ConsumerStatefulWidget {
-  const PadhSettingsScreen({super.key});
+class GyaanAiSettingsScreen extends ConsumerStatefulWidget {
+  const GyaanAiSettingsScreen({super.key});
 
   @override
-  ConsumerState<PadhSettingsScreen> createState() => _PadhSettingsScreenState();
+  ConsumerState<GyaanAiSettingsScreen> createState() => _GyaanAiSettingsScreenState();
 }
 
-class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
+class _GyaanAiSettingsScreenState extends ConsumerState<GyaanAiSettingsScreen> {
   late final TextEditingController _djangoCtrl;
   late final TextEditingController _ollamaCtrl;
   bool _testing = false;
@@ -74,11 +74,11 @@ class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: PadhAiColors.background,
+      backgroundColor: GyaanAiColors.background,
       appBar: AppBar(
         title: const Text('Settings'),
-        backgroundColor: PadhAiColors.background,
-        foregroundColor: PadhAiColors.primary,
+        backgroundColor: GyaanAiColors.background,
+        foregroundColor: GyaanAiColors.primary,
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
@@ -87,7 +87,7 @@ class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
             'Server',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w800,
-                  color: PadhAiColors.primary,
+                  color: GyaanAiColors.primary,
                 ),
           ),
           const SizedBox(height: 12),
@@ -116,7 +116,7 @@ class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
             icon: const Icon(Icons.save_outlined),
             label: const Text('Save'),
             style: FilledButton.styleFrom(
-              backgroundColor: PadhAiColors.primary,
+              backgroundColor: GyaanAiColors.primary,
               minimumSize: const Size.fromHeight(48),
             ),
           ),
@@ -138,7 +138,7 @@ class _PadhSettingsScreenState extends ConsumerState<PadhSettingsScreen> {
               _testResult!,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: _testResult!.startsWith('OK')
-                        ? PadhAiColors.secondary
+                        ? GyaanAiColors.secondary
                         : Colors.red,
                   ),
             ),
