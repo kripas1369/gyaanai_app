@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_markdown_latex/flutter_markdown_latex.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:intl/intl.dart';
 
@@ -25,11 +27,14 @@ class GyaanAiChatScreen extends ConsumerStatefulWidget {
     required this.grade,
     required this.subject,
     required this.sessionId,
+    this.initialQuestion,
   });
 
   final int grade;
   final SubjectItem subject;
   final int sessionId;
+  /// If set, this question is auto-sent as the first message (from Practice Questions).
+  final String? initialQuestion;
 
   @override
   ConsumerState<GyaanAiChatScreen> createState() => _GyaanAiChatScreenState();
@@ -41,6 +46,7 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
   final _scroll = ScrollController();
   final _input = TextEditingController();
   final _focus = FocusNode();
+  final _imagePicker = ImagePicker();
 
   var _thinking = false;
   var _streamingAssistant = false;
@@ -48,12 +54,17 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
   var _showSalute = false; // Brief salute animation after response completes
   List<_ChatLine> _lines = [];
   AiMode _currentMode = AiMode.offline;
+  XFile? _pendingImage; // Image selected by user, not yet sent
 
   /// Stop streaming flag
   var _stopRequested = false;
 
-  /// Tracks if last response was truncated (timeout/limit) - shows Continue button
+  /// Tracks if last response was truncated (timeout/limit)
   var _lastResponseTruncated = false;
+
+  /// How many times we have auto-continued in a row (prevents infinite loops)
+  var _autoContinueCount = 0;
+  static const _maxAutoContinues = 3;
 
   /// Assistant bubbles: English from the model; Nepali is loaded on demand in the app.
   _AnswerLang _answerLang = _AnswerLang.english;
@@ -67,9 +78,105 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     _load();
     _checkAiMode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Model already loaded in splash - no need to reload here
       if (mounted) _focus.requestFocus();
     });
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+      if (picked != null && mounted) {
+        setState(() => _pendingImage = picked);
+        HapticFeedback.lightImpact();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not pick image: $e')),
+        );
+      }
+    }
+  }
+
+  void _showImageSourceSheet() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'Attach Image',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              Text(
+                'Take a photo of your textbook question',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: GyaanAiColors.textSecondary,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: GyaanAiColors.secondary.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.camera_alt_rounded, color: GyaanAiColors.secondary),
+                ),
+                title: const Text('Take Photo'),
+                subtitle: const Text('Use camera to capture question'),
+                onTap: () {
+                  Navigator.pop(c);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.photo_library_rounded, color: Colors.blue),
+                ),
+                title: const Text('Choose from Gallery'),
+                subtitle: const Text('Select from your photos'),
+                onTap: () {
+                  Navigator.pop(c);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _checkAiMode() async {
@@ -115,6 +222,16 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     });
     _scrollToBottom();
     _prefetchNepaliIfNeeded();
+
+    // Auto-send initial question from Practice Questions screen
+    if (widget.initialQuestion != null && _lines.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _input.text = widget.initialQuestion!;
+          _send();
+        }
+      });
+    }
   }
 
   void _scrollToBottom({bool jump = false}) {
@@ -141,8 +258,17 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
   }
 
   Future<void> _send() async {
-    final text = _input.text.trim();
-    if (text.isEmpty || _thinking) return;
+    var text = _input.text.trim();
+    final imageToSend = _pendingImage;
+
+    // Allow sending with image even if no text
+    if (text.isEmpty && imageToSend == null) return;
+    if (_thinking) return;
+
+    // Default text when only image is sent
+    if (text.isEmpty && imageToSend != null) {
+      text = 'Please help me solve this problem from the image.';
+    }
 
     final repo = ref.read(gyaanAiChatRepoProvider);
     final hybridAi = ref.read(hybridAiProvider);
@@ -150,13 +276,20 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     final system = buildGyaanAiSystemPrompt(
       grade: widget.grade,
       subjectEnglish: widget.subject.english,
+      hasImage: imageToSend != null,
     );
+
+    final imagePath = imageToSend?.path;
+    // Reset auto-continue counter only when user sends a brand-new question
+    final isContinuation = text.trim().toLowerCase() == 'continue';
+    if (!isContinuation) _autoContinueCount = 0;
 
     setState(() {
       _thinking = true;
-      _preparing = true;  // Show "Preparing AI..." message
+      _preparing = true;
       _streamingAssistant = false;
-      _lastResponseTruncated = false;  // Reset truncation flag for new message
+      _lastResponseTruncated = false;
+      _pendingImage = null;
     });
     _input.clear();
 
@@ -180,7 +313,7 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
 
       if (!mounted) return;
       setState(() {
-        _lines = rows.map(_ChatLine.fromDb).toList();
+        _lines = _buildLinesFromRows(rows, lastUserImagePath: imagePath);
       });
       _scrollToBottom();
 
@@ -196,8 +329,6 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
         timestamp: DateTime.parse(row['created_at'] as String),
       )).toList();
 
-      // Use hybrid AI service - automatically chooses online or offline
-      // Now with session tracking and conversation history for context
       await for (final assembled in hybridAi.runInferenceStreaming(
         grade: widget.grade,
         subjectEnglish: widget.subject.english,
@@ -206,7 +337,6 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
         sessionId: widget.sessionId,
         history: history,
       )) {
-        // Handle stop request
         if (_stopRequested) break;
 
         fullAnswer = assembled;
@@ -216,10 +346,10 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
         lastUiAt = now;
         lastPainted = assembled;
         setState(() {
-          _preparing = false;  // First token received, prefill is done
+          _preparing = false;
           _streamingAssistant = true;
           _lines = [
-            ...rows.map(_ChatLine.fromDb),
+            ..._buildLinesFromRows(rows, lastUserImagePath: imagePath),
             _ChatLine(
               dbId: null,
               role: 'assistant',
@@ -235,7 +365,7 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
         setState(() {
           _streamingAssistant = true;
           _lines = [
-            ...rows.map(_ChatLine.fromDb),
+            ..._buildLinesFromRows(rows, lastUserImagePath: imagePath),
             _ChatLine(
               dbId: null,
               role: 'assistant',
@@ -287,13 +417,24 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
       );
     } finally {
       if (mounted) {
+        final wasStopped = _stopRequested;
         setState(() {
           _thinking = false;
           _preparing = false;
           _streamingAssistant = false;
           _stopRequested = false;
-          _showSalute = !_lastResponseTruncated; // Only salute if not truncated
+          _showSalute = !_lastResponseTruncated;
         });
+
+        // Auto-continue if truncated and user did not manually stop
+        if (_lastResponseTruncated && !wasStopped && _autoContinueCount < _maxAutoContinues) {
+          _autoContinueCount++;
+          // Brief delay so the UI can settle before continuing
+          await Future.delayed(const Duration(milliseconds: 400));
+          if (mounted) await _continueResponse();
+        } else if (!_lastResponseTruncated) {
+          _autoContinueCount = 0; // Reset counter on clean finish
+        }
       }
     }
   }
@@ -305,6 +446,7 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
   void _togglePause() {
     setState(() {
       _stopRequested = true;
+      _autoContinueCount = _maxAutoContinues; // Prevent auto-continue after manual stop
     });
   }
 
@@ -316,7 +458,6 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
       _lastResponseTruncated = false;
     });
 
-    // Set the input to "continue" and send
     _input.text = 'continue';
     await _send();
   }
@@ -664,6 +805,30 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     );
   }
 
+  /// Builds chat lines from DB rows, injecting `imagePath` into the last user message.
+  List<_ChatLine> _buildLinesFromRows(
+    List<Map<String, Object?>> rows, {
+    String? lastUserImagePath,
+  }) {
+    final lines = rows.map(_ChatLine.fromDb).toList();
+    if (lastUserImagePath != null) {
+      for (var i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].role == 'user') {
+          final l = lines[i];
+          lines[i] = _ChatLine(
+            dbId: l.dbId,
+            role: l.role,
+            content: l.content,
+            createdAt: l.createdAt,
+            imagePath: lastUserImagePath,
+          );
+          break;
+        }
+      }
+    }
+    return lines;
+  }
+
   void _prefetchNepaliIfNeeded() {
     if (_answerLang != _AnswerLang.nepali) return;
     for (final line in _lines) {
@@ -787,12 +952,191 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     return _SafeMarkdown(data: line.content, style: baseStyle);
   }
 
+  Widget _buildEmptyState(BuildContext context) {
+    final suggestions = getSubjectSuggestions(widget.grade, widget.subject.key);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                gradient: GyaanAiColors.gradientPrimary,
+                shape: BoxShape.circle,
+                boxShadow: GyaanAiShadows.coloredShadow(GyaanAiColors.primary),
+              ),
+              child: Center(
+                child: Text(
+                  widget.subject.emoji,
+                  style: const TextStyle(fontSize: 38),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              widget.grade == 0 ? 'GyaanAi Assistant' : widget.subject.nepali,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: GyaanAiColors.textPrimary,
+                  ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.grade == 0
+                  ? 'Ask me anything!'
+                  : 'Class ${widget.grade} • ${widget.subject.english}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: GyaanAiColors.textSecondary,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: GyaanAiColors.secondary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.camera_alt_rounded, size: 14, color: GyaanAiColors.secondary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Tap 📷 to photograph a question',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: GyaanAiColors.secondary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Try asking:',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: GyaanAiColors.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: suggestions.map((q) {
+                return GestureDetector(
+                  onTap: () {
+                    _input.text = q;
+                    _focus.requestFocus();
+                    setState(() {});
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: GyaanAiColors.secondary.withValues(alpha: 0.25),
+                      ),
+                      boxShadow: GyaanAiShadows.card,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.lightbulb_outline_rounded,
+                          size: 14,
+                          color: GyaanAiColors.accent,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            q,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: GyaanAiColors.textPrimary,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImagePreview() {
+    if (_pendingImage == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: GyaanAiColors.secondary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: GyaanAiColors.secondary.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              File(_pendingImage!.path),
+              width: 60,
+              height: 60,
+              fit: BoxFit.cover,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Image attached',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: GyaanAiColors.secondary,
+                      ),
+                ),
+                Text(
+                  'AI will analyze this image',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: GyaanAiColors.textSecondary,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () => setState(() => _pendingImage = null),
+            icon: const Icon(Icons.close_rounded, size: 20),
+            color: GyaanAiColors.textSecondary,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('h:mm a');
     final showTyping = _thinking && !_streamingAssistant;
     final showAnimation = showTyping || _showSalute;
     final showContinueButton = _lastResponseTruncated && !_thinking;
+    final isEmpty = _lines.isEmpty && !showAnimation;
 
     return ScaffoldWithBanner(
       appBar: AppBar(
@@ -888,130 +1232,154 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
-              controller: _scroll,
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              itemCount: _lines.length + (showAnimation ? 1 : 0) + (showContinueButton ? 1 : 0),
-              itemBuilder: (context, i) {
-                // Show Continue button after messages when response was truncated
-                if (showContinueButton && i == _lines.length) {
-                  return _ContinueButton(onPressed: _continueResponse);
-                }
-                // Adjust index for animation if Continue button is shown
-                final animationIndex = showContinueButton ? _lines.length + 1 : _lines.length;
-                if (showAnimation && i == animationIndex) {
-                  // Show running man while thinking, salute when done
-                  if (_showSalute) {
-                    return _SaluteAnimation(onComplete: _dismissSalute);
-                  }
-                  return _TypingBlock(preparing: _preparing);
-                }
-                final line = _lines[i];
-                final isUser = line.role == 'user';
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Align(
-                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.86,
-                      ),
-                      child: Column(
-                        crossAxisAlignment:
-                            isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: isUser
-                                ? MainAxisAlignment.end
-                                : MainAxisAlignment.start,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              if (!isUser) ...[
-                                Container(
-                                  width: 30,
-                                  height: 30,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: GyaanAiColors.primary.withValues(alpha: 0.12),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: GyaanAiColors.secondary.withValues(alpha: 0.35),
-                                    ),
-                                  ),
-                                  child: const Text('🍃', style: TextStyle(fontSize: 16)),
-                                ),
-                                const SizedBox(width: 8),
-                              ],
-                              Flexible(
-                                child: GestureDetector(
-                                  onLongPress: line.streaming || line.dbId == null
-                                      ? null
-                                      : () => _showMessageOptions(line),
-                                  child: RepaintBoundary(
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        color: isUser
-                                            ? GyaanAiColors.bubbleUser
-                                            : GyaanAiColors.bubbleAi,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: isUser
-                                            ? null
-                                            : Border.all(
-                                                color: Colors.black.withValues(alpha: 0.06),
-                                              ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.05),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 3),
+            child: isEmpty
+                ? _buildEmptyState(context)
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    itemCount: _lines.length + (showAnimation ? 1 : 0) + (showContinueButton ? 1 : 0),
+                    itemBuilder: (context, i) {
+                      if (showContinueButton && i == _lines.length) {
+                        return _ContinueButton(onPressed: _continueResponse);
+                      }
+                      final animationIndex = showContinueButton ? _lines.length + 1 : _lines.length;
+                      if (showAnimation && i == animationIndex) {
+                        if (_showSalute) {
+                          return _SaluteAnimation(onComplete: _dismissSalute);
+                        }
+                        return _TypingBlock(preparing: _preparing);
+                      }
+                      final line = _lines[i];
+                      final isUser = line.role == 'user';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Align(
+                          alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width * 0.86,
+                            ),
+                            child: Column(
+                              crossAxisAlignment:
+                                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: isUser
+                                      ? MainAxisAlignment.end
+                                      : MainAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    if (!isUser) ...[
+                                      Container(
+                                        width: 30,
+                                        height: 30,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [Color(0xFF1B5E20), Color(0xFF388E3C)],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
                                           ),
-                                        ],
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Text('🍃', style: TextStyle(fontSize: 14)),
                                       ),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12),
-                                        child: isUser
-                                            ? Text(
-                                                line.content,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodyMedium
-                                                    ?.copyWith(color: GyaanAiColors.textPrimary),
-                                              )
-                                            : (line.streaming
-                                                // Streaming: smooth word-by-word animation
-                                                ? _AnimatedStreamingText(
-                                                    text: line.content,
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodyMedium
-                                                        ?.copyWith(
-                                                          color: GyaanAiColors.textPrimary,
+                                      const SizedBox(width: 8),
+                                    ],
+                                    Flexible(
+                                      child: GestureDetector(
+                                        onLongPress: line.streaming || line.dbId == null
+                                            ? null
+                                            : () => _showMessageOptions(line),
+                                        child: RepaintBoundary(
+                                          child: DecoratedBox(
+                                            decoration: BoxDecoration(
+                                              color: isUser
+                                                  ? GyaanAiColors.bubbleUser
+                                                  : GyaanAiColors.bubbleAi,
+                                              borderRadius: BorderRadius.only(
+                                                topLeft: const Radius.circular(16),
+                                                topRight: const Radius.circular(16),
+                                                bottomLeft: Radius.circular(isUser ? 16 : 4),
+                                                bottomRight: Radius.circular(isUser ? 4 : 16),
+                                              ),
+                                              border: isUser
+                                                  ? null
+                                                  : Border.all(
+                                                      color: Colors.black.withValues(alpha: 0.06),
+                                                    ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withValues(alpha: 0.05),
+                                                  blurRadius: 10,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Padding(
+                                              padding: const EdgeInsets.all(12),
+                                              child: isUser
+                                                  ? Column(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        if (line.imagePath != null) ...[
+                                                          ClipRRect(
+                                                            borderRadius: BorderRadius.circular(8),
+                                                            child: Image.file(
+                                                              File(line.imagePath!),
+                                                              width: double.infinity,
+                                                              height: 180,
+                                                              fit: BoxFit.cover,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(height: 8),
+                                                        ],
+                                                        Text(
+                                                          line.content,
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .bodyMedium
+                                                              ?.copyWith(
+                                                                  color: GyaanAiColors.textPrimary),
                                                         ),
-                                                  )
-                                                // Final: markdown + LaTeX
-                                                : _buildAssistantMessageBody(line, context)),
+                                                      ],
+                                                    )
+                                                  : (line.streaming
+                                                      ? _AnimatedStreamingText(
+                                                          text: line.content,
+                                                          style: Theme.of(context)
+                                                              .textTheme
+                                                              .bodyMedium
+                                                              ?.copyWith(
+                                                                color: GyaanAiColors.textPrimary,
+                                                              ),
+                                                        )
+                                                      : _buildAssistantMessageBody(line, context)),
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            df.format(line.createdAt),
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: GyaanAiColors.textSecondary,
+                                const SizedBox(height: 4),
+                                Text(
+                                  df.format(line.createdAt),
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: GyaanAiColors.textSecondary,
+                                      ),
                                 ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
+          // Image preview strip
+          _buildImagePreview(),
           SafeArea(
             top: false,
             child: Padding(
@@ -1019,20 +1387,41 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 14,
+                      blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
                   ],
                   border: Border.all(
-                    color: GyaanAiColors.secondary.withValues(alpha: 0.12),
+                    color: _pendingImage != null
+                        ? GyaanAiColors.secondary.withValues(alpha: 0.4)
+                        : GyaanAiColors.secondary.withValues(alpha: 0.12),
+                    width: _pendingImage != null ? 1.5 : 1,
                   ),
                 ),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    // Camera / image attach button
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6, bottom: 6),
+                      child: IconButton(
+                        onPressed: _thinking ? null : _showImageSourceSheet,
+                        icon: Icon(
+                          _pendingImage != null
+                              ? Icons.image_rounded
+                              : Icons.add_photo_alternate_rounded,
+                          color: _pendingImage != null
+                              ? GyaanAiColors.secondary
+                              : GyaanAiColors.textHint,
+                        ),
+                        tooltip: 'Attach image',
+                        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                      ),
+                    ),
                     Expanded(
                       child: TextField(
                         controller: _input,
@@ -1041,31 +1430,55 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
                         maxLines: 5,
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => _send(),
-                        decoration: const InputDecoration(
-                          hintText: 'Type your question... / आफ्नो प्रश्न लेख्नुहोस्...',
+                        decoration: InputDecoration(
+                          hintText: _pendingImage != null
+                              ? 'Add a question about this image...'
+                              : 'Type your question... / आफ्नो प्रश्न...',
                           border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 14,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 8,
                             vertical: 12,
                           ),
                         ),
                       ),
                     ),
                     // Show stop button during streaming, send button otherwise
-                    if (_streamingAssistant)
-                      _StopGeneratingButton(onPressed: _togglePause)
-                    else
-                      ValueListenableBuilder<TextEditingValue>(
-                        valueListenable: _input,
-                        builder: (context, value, _) {
-                          final empty = value.text.trim().isEmpty;
-                          return IconButton(
-                            onPressed: (_thinking || empty) ? null : _send,
-                            icon: const Icon(Icons.send_rounded),
-                            color: GyaanAiColors.secondary,
-                          );
-                        },
-                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4, bottom: 4),
+                      child: _streamingAssistant
+                          ? _StopGeneratingButton(onPressed: _togglePause)
+                          : ValueListenableBuilder<TextEditingValue>(
+                              valueListenable: _input,
+                              builder: (context, value, _) {
+                                final hasContent = value.text.trim().isNotEmpty || _pendingImage != null;
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    gradient: hasContent && !_thinking
+                                        ? GyaanAiColors.gradientPrimary
+                                        : null,
+                                    color: hasContent && !_thinking
+                                        ? null
+                                        : Colors.grey.shade200,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: IconButton(
+                                    onPressed: (_thinking || !hasContent) ? null : _send,
+                                    icon: Icon(
+                                      Icons.send_rounded,
+                                      size: 20,
+                                      color: hasContent && !_thinking
+                                          ? Colors.white
+                                          : Colors.grey.shade400,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
                   ],
                 ),
               ),
@@ -1084,6 +1497,7 @@ class _ChatLine {
     required this.content,
     required this.createdAt,
     this.streaming = false,
+    this.imagePath,
   });
 
   final int? dbId;
@@ -1091,6 +1505,7 @@ class _ChatLine {
   final String content;
   final DateTime createdAt;
   final bool streaming;
+  final String? imagePath;
 
   static _ChatLine fromDb(Map<String, Object?> m) {
     return _ChatLine(
@@ -1826,6 +2241,8 @@ class _AnimatedStreamingTextState extends State<_AnimatedStreamingText>
 }
 
 /// Lightweight markdown for streaming - handles partial content gracefully.
+/// Uses the same LaTeX-aware logic as [_SafeMarkdown] so math renders correctly
+/// even while tokens are still arriving.
 class _StreamingMarkdown extends StatelessWidget {
   const _StreamingMarkdown({required this.data, this.style});
 
@@ -1834,10 +2251,9 @@ class _StreamingMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Clean up partial markdown that might cause render issues
     var cleanData = data;
 
-    // Don't render incomplete code blocks - show as text
+    // Don't render incomplete code blocks - show as plain text until closed
     final codeBlockCount = '```'.allMatches(cleanData).length;
     if (codeBlockCount.isOdd) {
       final lastIdx = cleanData.lastIndexOf('```');
@@ -1846,30 +2262,42 @@ class _StreamingMarkdown extends StatelessWidget {
       }
     }
 
-    // Strip incomplete LaTeX
-    if (cleanData.contains('\$')) {
+    // Handle $ signs: render valid LaTeX, strip only orphaned trailing $
+    final useLatex = _SafeMarkdown._hasValidLatex(cleanData);
+    if (!useLatex && cleanData.contains('\$')) {
       cleanData = _SafeMarkdown._stripDollars(cleanData);
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return MarkdownBody(
-      data: cleanData,
+      data: useLatex ? cleanData : cleanData,
       selectable: false,
       shrinkWrap: true,
       softLineBreak: true,
-      extensionSet: md.ExtensionSet.gitHubFlavored,
+      builders: useLatex
+          ? {
+              'latex': LatexElementBuilder(
+                textStyle: style,
+                textScaleFactor: 1.05,
+              ),
+            }
+          : {},
+      extensionSet: useLatex
+          ? md.ExtensionSet(
+              [LatexBlockSyntax(), ...md.ExtensionSet.gitHubFlavored.blockSyntaxes],
+              [LatexInlineSyntax(), ...md.ExtensionSet.gitHubFlavored.inlineSyntaxes],
+            )
+          : md.ExtensionSet.gitHubFlavored,
       styleSheet: MarkdownStyleSheet(
         p: style,
         code: style?.copyWith(
           fontFamily: 'monospace',
           fontSize: (style?.fontSize ?? 14) * 0.9,
-          backgroundColor: Theme.of(context).brightness == Brightness.dark
-              ? Colors.grey.shade800
-              : Colors.grey.shade200,
+          backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
         ),
         codeblockDecoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? Colors.grey.shade900
-              : Colors.grey.shade100,
+          color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
           borderRadius: BorderRadius.circular(8),
         ),
         blockquoteDecoration: BoxDecoration(

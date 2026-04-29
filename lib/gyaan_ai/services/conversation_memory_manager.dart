@@ -120,24 +120,22 @@ class MemoryConfig {
   });
 
   /// Low RAM device configuration
-  /// AGGRESSIVE: Minimal context for fastest prefill (Class 7 simple queries)
   static const lowRam = MemoryConfig(
-    maxWorkingMemoryTurns: 2,
-    maxSummaryChars: 100,
-    summarizationThreshold: 4,
-    maxPromptChars: 500,  // ~0.5-1s prefill
-    maxMessageChars: 150,
+    maxWorkingMemoryTurns: 3,
+    maxSummaryChars: 150,
+    summarizationThreshold: 6,
+    maxPromptChars: 650,
+    maxMessageChars: 200,
     useSentenceBoundary: true,
   );
 
   /// Standard RAM device configuration
-  /// OPTIMIZED: Still fast prefill with decent context
   static const standard = MemoryConfig(
-    maxWorkingMemoryTurns: 2,
-    maxSummaryChars: 150,
-    summarizationThreshold: 5,
-    maxPromptChars: 700,  // ~1-1.5s prefill
-    maxMessageChars: 200,
+    maxWorkingMemoryTurns: 3,
+    maxSummaryChars: 220,
+    summarizationThreshold: 8,
+    maxPromptChars: 900,
+    maxMessageChars: 280,
     useSentenceBoundary: true,
   );
 }

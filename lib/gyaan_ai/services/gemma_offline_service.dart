@@ -295,8 +295,8 @@ String _buildOfflineInferencePrompt({
   if (history != null && history.isNotEmpty) {
     // For continuation: include last exchange (trimmed)
     // For normal: include only last 2 turns for speed
-    final maxTurns = isContinuation ? 2 : (isLowRamDevice ? 2 : 4);
-    final maxMsgChars = isContinuation ? 500 : (isLowRamDevice ? 200 : 350);
+    final maxTurns = isContinuation ? 3 : (isLowRamDevice ? 3 : 5);
+    final maxMsgChars = isContinuation ? 600 : (isLowRamDevice ? 280 : 450);
 
     final recentHistory = history.length > maxTurns
         ? history.sublist(history.length - maxTurns)
@@ -318,7 +318,7 @@ String _buildOfflineInferencePrompt({
 
   // Current user message - keep short for fast prefill
   var user = cleanedUserMessage.trim();
-  final maxUserChars = isLowRamDevice ? 400 : 600;
+  final maxUserChars = isLowRamDevice ? 500 : 750;
   if (user.length > maxUserChars) {
     user = '${user.substring(0, maxUserChars)}…';
   }
@@ -416,13 +416,12 @@ class GemmaOfflineService {
   /// OPTIMIZATION: Prefill freeze is ~proportional to prompt length.
   /// 500 chars ≈ 0.5-1s prefill, 800 chars ≈ 1-2s, 1200 chars ≈ 2-3s
   /// on a 2GHz device. Keeping prompts minimal for Class 7 level.
-  static const int _maxPromptCharsLowRam = 500;
-  static const int _maxPromptCharsHighRam = 700;
+  static const int _maxPromptCharsLowRam = 650;
+  static const int _maxPromptCharsHighRam = 900;
   int _effectiveMaxPromptChars = _maxPromptCharsLowRam;
 
-  /// Max output tokens - increased for more complete answers.
-  /// 512 tokens ≈ 350-400 words, good for Class 7 explanations.
-  static const int _defaultMaxOutputTokens = 512;
+  /// Max output tokens — 1024 tokens ≈ 700-800 words, enough for full math solutions.
+  static const int _defaultMaxOutputTokens = 1024;
 
   /// Inference timeout to prevent AI freezing.
   /// If inference takes longer than this, we abort and return partial response.
@@ -971,8 +970,8 @@ class GemmaOfflineService {
               // FAST PATH: KV cache active, just send new message
               // This is 2-3x faster! (Skip prefill of system+history tokens)
               promptToSend = userMessage.trim();
-              if (promptToSend.length > 600) {
-                promptToSend = '${promptToSend.substring(0, 600)}…';
+              if (promptToSend.length > 750) {
+                promptToSend = '${promptToSend.substring(0, 750)}…';
               }
               debugPrint('GemmaService: REUSING KV cache - sending only user message (${promptToSend.length} chars)');
             } else {

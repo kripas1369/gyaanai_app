@@ -33,6 +33,23 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   final _searchFocus = FocusNode();
   bool _searchVisible = false;
 
+  Color get _subjectColor => _colorForSubjectKey(widget.subject.key);
+
+  Color _colorForSubjectKey(String key) {
+    return switch (key) {
+      'math'     => const Color(0xFF1976D2),
+      'science'  => const Color(0xFF388E3C),
+      'english'  => const Color(0xFF7B1FA2),
+      'nepali'   => const Color(0xFFC62828),
+      'social'   => const Color(0xFFE65100),
+      'computer' => const Color(0xFF00838F),
+      'health'   => const Color(0xFFAD1457),
+      'opt_math' => const Color(0xFF283593),
+      'general'  => const Color(0xFF5C35C9),
+      _          => GyaanAiColors.secondary,
+    };
+  }
+
   @override
   void initState() {
     super.initState();
@@ -49,10 +66,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   Future<void> _reload() async {
     setState(() => _loading = true);
     final repo = ref.read(gyaanAiChatRepoProvider);
-    final rows = await repo.sessionsForGradeSubject(
-      widget.grade,
-      widget.subject.key,
-    );
+    final rows = await repo.sessionsForGradeSubject(widget.grade, widget.subject.key);
     final out = <_SessionRow>[];
     for (final r in rows) {
       final id = r['id'] as int;
@@ -60,15 +74,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       final lastAt = DateTime.parse(r['last_message_at'] as String);
       final preview = await repo.lastPreview(id);
       final count = await repo.messageCountForSession(id);
-      out.add(
-        _SessionRow(
-          id: id,
-          title: title,
-          lastAt: lastAt,
-          preview: preview ?? '',
-          messageCount: count,
-        ),
-      );
+      out.add(_SessionRow(id: id, title: title, lastAt: lastAt, preview: preview ?? '', messageCount: count));
     }
     if (mounted) {
       setState(() {
@@ -82,28 +88,18 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     if (_sessions == null) return [];
     if (_searchQuery.isEmpty) return _sessions!;
     final q = _searchQuery.toLowerCase();
-    return _sessions!.where((s) {
-      return s.title.toLowerCase().contains(q) ||
-          s.preview.toLowerCase().contains(q);
-    }).toList();
+    return _sessions!.where((s) =>
+      s.title.toLowerCase().contains(q) || s.preview.toLowerCase().contains(q),
+    ).toList();
   }
 
   Future<void> _openNewChat() async {
     HapticFeedback.lightImpact();
     final repo = ref.read(gyaanAiChatRepoProvider);
-    final id = await repo.createEmptySession(
-      grade: widget.grade,
-      subjectKey: widget.subject.key,
-    );
+    final id = await repo.createEmptySession(grade: widget.grade, subjectKey: widget.subject.key);
     if (!mounted) return;
     await Navigator.of(context).push(
-      slideFromRight(
-        GyaanAiChatScreen(
-          grade: widget.grade,
-          subject: widget.subject,
-          sessionId: id,
-        ),
-      ),
+      slideFromRight(GyaanAiChatScreen(grade: widget.grade, subject: widget.subject, sessionId: id)),
     );
     if (mounted) _reload();
   }
@@ -113,15 +109,11 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Chat?'),
-        content: Text(
-          'Delete "${session.title}"?\n\nThis will remove all ${session.messageCount} messages permanently.',
-        ),
+        content: Text('Delete "${session.title}"?\n\nThis will remove all ${session.messageCount} messages permanently.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(c, true),
@@ -134,7 +126,6 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
 
     final repo = ref.read(gyaanAiChatRepoProvider);
     await repo.deleteSession(session.id);
-    // Clear Gemma session cache
     ref.read(gemmaOfflineProvider).clearSession(session.id);
     HapticFeedback.heavyImpact();
     if (mounted) {
@@ -155,16 +146,13 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Clear All Chats?'),
         content: Text(
-          'Delete all ${_sessions!.length} chat sessions for ${widget.subject.english}?\n\n'
-          'This cannot be undone.',
+          'Delete all ${_sessions!.length} chat sessions for ${widget.subject.english}?\n\nThis cannot be undone.',
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(c, true),
@@ -176,21 +164,14 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
     if (ok != true || !mounted) return;
 
     final repo = ref.read(gyaanAiChatRepoProvider);
-    await repo.deleteAllSessionsForGradeSubject(
-      widget.grade,
-      widget.subject.key,
-    );
-    // Clear all Gemma session caches
+    await repo.deleteAllSessionsForGradeSubject(widget.grade, widget.subject.key);
     for (final s in _sessions!) {
       ref.read(gemmaOfflineProvider).clearSession(s.id);
     }
     HapticFeedback.heavyImpact();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('All chats cleared'),
-          behavior: SnackBarBehavior.floating,
-        ),
+        const SnackBar(content: Text('All chats cleared'), behavior: SnackBarBehavior.floating),
       );
       _reload();
     }
@@ -204,9 +185,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
         _searchQuery = '';
         _searchController.clear();
       } else {
-        Future.delayed(const Duration(milliseconds: 100), () {
-          _searchFocus.requestFocus();
-        });
+        Future.delayed(const Duration(milliseconds: 100), () => _searchFocus.requestFocus());
       }
     });
   }
@@ -226,6 +205,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   Widget build(BuildContext context) {
     final filtered = _filteredSessions;
     final hasChats = _sessions != null && _sessions!.isNotEmpty;
+    final color = _subjectColor;
 
     return ScaffoldWithBanner(
       appBar: AppBar(
@@ -240,17 +220,10 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
             ? TextField(
                 controller: _searchController,
                 focusNode: _searchFocus,
-                decoration: const InputDecoration(
-                  hintText: 'Search chats...',
-                  border: InputBorder.none,
-                ),
+                decoration: const InputDecoration(hintText: 'Search chats...', border: InputBorder.none),
                 onChanged: (v) => setState(() => _searchQuery = v),
               )
-            : Text(
-                widget.grade == 0
-                    ? 'General AI'
-                    : '${widget.subject.english} — Class ${widget.grade}',
-              ),
+            : Text(widget.grade == 0 ? 'General AI' : '${widget.subject.english} — Class ${widget.grade}'),
         actions: [
           if (hasChats)
             IconButton(
@@ -259,9 +232,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
             ),
           if (hasChats && !_searchVisible)
             PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'clear_all') _clearAllChats();
-              },
+              onSelected: (v) { if (v == 'clear_all') _clearAllChats(); },
               itemBuilder: (c) => [
                 const PopupMenuItem(
                   value: 'clear_all',
@@ -281,31 +252,54 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewChat,
         icon: const Icon(Icons.add_rounded),
-        label: const Text('New Chat'),
-        backgroundColor: GyaanAiColors.secondary,
+        label: const Text('New Chat', style: TextStyle(fontWeight: FontWeight.w700)),
+        backgroundColor: color,
         foregroundColor: Colors.white,
+        elevation: 4,
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      body: _loading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading chats...'),
-                ],
-              ),
-            )
-          : _sessions!.isEmpty
-              ? _buildEmptyState()
-              : filtered.isEmpty
-                  ? _buildNoSearchResults()
-                  : _buildChatList(filtered),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Subject header
+          _SubjectHeader(
+            subject: widget.subject,
+            grade: widget.grade,
+            color: color,
+            chatCount: _sessions?.length ?? 0,
+            loading: _loading,
+          ),
+          Expanded(
+            child: _loading
+                ? _buildLoading(color)
+                : _sessions!.isEmpty
+                    ? _buildEmptyState(color)
+                    : filtered.isEmpty
+                        ? _buildNoSearchResults()
+                        : _buildChatList(filtered, color),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildLoading(Color color) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(color: color),
+          const SizedBox(height: 16),
+          Text(
+            'Loading chats...',
+            style: TextStyle(color: GyaanAiColors.textSecondary, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(Color color) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -316,12 +310,11 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
               width: 100,
               height: 100,
               decoration: BoxDecoration(
-                color: GyaanAiColors.secondary.withValues(alpha: 0.1),
+                color: color.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
+                border: Border.all(color: color.withValues(alpha: 0.2), width: 2),
               ),
-              child: const Center(
-                child: Text('📚', style: TextStyle(fontSize: 48)),
-              ),
+              child: Center(child: Text(widget.subject.emoji, style: const TextStyle(fontSize: 48))),
             ),
             const SizedBox(height: 24),
             Text(
@@ -333,28 +326,25 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Start learning by asking a question!',
+              'Start learning ${widget.subject.english}\nby asking your first question!',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: GyaanAiColors.textSecondary,
-                  ),
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: GyaanAiColors.textSecondary),
             ),
             const SizedBox(height: 4),
             Text(
               'सिक्न सुरु गर्न प्रश्न सोध्नुहोस्!',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: GyaanAiColors.textSecondary,
-                  ),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: GyaanAiColors.textSecondary),
             ),
             const SizedBox(height: 32),
             FilledButton.icon(
               onPressed: _openNewChat,
               icon: const Icon(Icons.add_rounded),
-              label: const Text('Start New Chat'),
+              label: const Text('Start New Chat', style: TextStyle(fontWeight: FontWeight.w700)),
               style: FilledButton.styleFrom(
-                backgroundColor: GyaanAiColors.secondary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                backgroundColor: color,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
           ],
@@ -368,48 +358,49 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.search_off_rounded,
-            size: 64,
-            color: GyaanAiColors.textSecondary.withValues(alpha: 0.5),
-          ),
+          Icon(Icons.search_off_rounded, size: 64, color: GyaanAiColors.textSecondary.withValues(alpha: 0.5)),
           const SizedBox(height: 16),
           Text(
             'No results for "$_searchQuery"',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: GyaanAiColors.textSecondary,
-                ),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(color: GyaanAiColors.textSecondary),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildChatList(List<_SessionRow> sessions) {
+  Widget _buildChatList(List<_SessionRow> sessions, Color color) {
     return RefreshIndicator(
+      color: color,
       onRefresh: _reload,
       child: ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-        itemCount: sessions.length + 1, // +1 for header
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+        itemCount: sessions.length + 1,
         itemBuilder: (context, i) {
           if (i == 0) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Row(
                 children: [
-                  Text(
-                    '${sessions.length} ${sessions.length == 1 ? 'chat' : 'chats'}',
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: GyaanAiColors.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${sessions.length} ${sessions.length == 1 ? 'chat' : 'chats'}',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                   const Spacer(),
                   Text(
                     'Swipe left to delete',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: GyaanAiColors.textSecondary.withValues(alpha: 0.7),
-                        ),
+                    style: TextStyle(color: GyaanAiColors.textSecondary.withValues(alpha: 0.7), fontSize: 11),
                   ),
                 ],
               ),
@@ -423,123 +414,40 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
               direction: DismissDirection.endToStart,
               confirmDismiss: (_) async {
                 await _deleteSession(r);
-                return false; // We handle deletion ourselves
+                return false;
               },
               background: Container(
                 alignment: Alignment.centerRight,
                 padding: const EdgeInsets.only(right: 20),
                 decoration: BoxDecoration(
                   color: Colors.red.shade400,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(
-                  Icons.delete_rounded,
-                  color: Colors.white,
-                  size: 28,
-                ),
+                child: const Icon(Icons.delete_rounded, color: Colors.white, size: 28),
               ),
-              child: _buildSessionTile(r),
+              child: _SessionTile(
+                row: r,
+                color: color,
+                relativeTime: _relativeTime(r.lastAt),
+                onTap: () async {
+                  HapticFeedback.selectionClick();
+                  await Navigator.of(context).push(
+                    slideFromRight(GyaanAiChatScreen(
+                      grade: widget.grade,
+                      subject: widget.subject,
+                      sessionId: r.id,
+                    )),
+                  );
+                  if (mounted) _reload();
+                },
+                onLongPress: () {
+                  HapticFeedback.mediumImpact();
+                  _showSessionOptions(r);
+                },
+              ),
             ),
           );
         },
-      ),
-    );
-  }
-
-  Widget _buildSessionTile(_SessionRow r) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      borderRadius: BorderRadius.circular(16),
-      elevation: 1,
-      shadowColor: Colors.black.withValues(alpha: 0.1),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () async {
-          HapticFeedback.selectionClick();
-          await Navigator.of(context).push(
-            slideFromRight(
-              GyaanAiChatScreen(
-                grade: widget.grade,
-                subject: widget.subject,
-                sessionId: r.id,
-              ),
-            ),
-          );
-          if (mounted) _reload();
-        },
-        onLongPress: () {
-          HapticFeedback.mediumImpact();
-          _showSessionOptions(r);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      r.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: GyaanAiColors.secondary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${r.messageCount}',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: GyaanAiColors.secondary,
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(
-                    Icons.access_time_rounded,
-                    size: 14,
-                    color: GyaanAiColors.textSecondary.withValues(alpha: 0.7),
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _relativeTime(r.lastAt),
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: GyaanAiColors.textSecondary,
-                        ),
-                  ),
-                ],
-              ),
-              if (r.preview.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  r.preview.length > 100 ? '${r.preview.substring(0, 100)}…' : r.preview,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: GyaanAiColors.textSecondary,
-                        height: 1.4,
-                      ),
-                ),
-              ],
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -547,9 +455,7 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   void _showSessionOptions(_SessionRow r) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (c) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -560,18 +466,13 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
                 width: 40,
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Text(
                   r.title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -582,26 +483,21 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: GyaanAiColors.secondary.withValues(alpha: 0.1),
+                    color: _subjectColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(
-                    Icons.open_in_new_rounded,
-                    color: GyaanAiColors.secondary,
-                  ),
+                  child: Icon(Icons.open_in_new_rounded, color: _subjectColor),
                 ),
                 title: const Text('Open Chat'),
                 onTap: () async {
                   Navigator.pop(c);
                   HapticFeedback.selectionClick();
                   await Navigator.of(context).push(
-                    slideFromRight(
-                      GyaanAiChatScreen(
-                        grade: widget.grade,
-                        subject: widget.subject,
-                        sessionId: r.id,
-                      ),
-                    ),
+                    slideFromRight(GyaanAiChatScreen(
+                      grade: widget.grade,
+                      subject: widget.subject,
+                      sessionId: r.id,
+                    )),
                   );
                   if (mounted) _reload();
                 },
@@ -625,6 +521,197 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SubjectHeader extends StatelessWidget {
+  const _SubjectHeader({
+    required this.subject,
+    required this.grade,
+    required this.color,
+    required this.chatCount,
+    required this.loading,
+  });
+
+  final SubjectItem subject;
+  final int grade;
+  final Color color;
+  final int chatCount;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [color, color.withValues(alpha: 0.7)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(color: color.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3)),
+              ],
+            ),
+            child: Center(child: Text(subject.emoji, style: const TextStyle(fontSize: 26))),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  grade == 0 ? 'General AI' : '${subject.english} — Class $grade',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: GyaanAiColors.textPrimary),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subject.nepali,
+                  style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          if (!loading)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$chatCount',
+                style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionTile extends StatelessWidget {
+  const _SessionTile({
+    required this.row,
+    required this.color,
+    required this.relativeTime,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final _SessionRow row;
+  final Color color;
+  final String relativeTime;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(18),
+      elevation: 1,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Row(
+          children: [
+            // Left accent bar
+            Container(
+              width: 4,
+              height: 80,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            row.title,
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Row(
+                          children: [
+                            Icon(Icons.access_time_rounded, size: 12, color: GyaanAiColors.textSecondary.withValues(alpha: 0.7)),
+                            const SizedBox(width: 3),
+                            Text(
+                              relativeTime,
+                              style: TextStyle(fontSize: 11, color: GyaanAiColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (row.preview.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        row.preview.length > 90 ? '${row.preview.substring(0, 90)}…' : row.preview,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: GyaanAiColors.textSecondary, height: 1.4),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.chat_bubble_outline_rounded, size: 10, color: color),
+                              const SizedBox(width: 3),
+                              Text(
+                                '${row.messageCount} messages',
+                                style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Icon(Icons.chevron_right_rounded, color: GyaanAiColors.textSecondary.withValues(alpha: 0.5)),
+            ),
+          ],
         ),
       ),
     );

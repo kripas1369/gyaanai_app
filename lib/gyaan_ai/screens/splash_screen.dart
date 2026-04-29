@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import '../services/gemma_offline_service.dart';
 import '../theme/gyaan_ai_theme.dart';
 import 'grade_selection_screen.dart';
 import 'model_download_screen.dart';
+import 'onboarding_screen.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -20,87 +22,68 @@ class SplashScreen extends ConsumerStatefulWidget {
 class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
   String _status = 'Starting...';
+  double _progress = 0.0;
   String? _error;
 
   late final AnimationController _logoCtrl;
-  late final AnimationController _textCtrl;
-  late final AnimationController _pulseCtrl;
+  late final AnimationController _contentCtrl;
+  late final AnimationController _particleCtrl;
 
   late final Animation<double> _logoScale;
   late final Animation<double> _logoOpacity;
-  late final Animation<double> _textOpacity;
-  late final Animation<Offset> _textSlide;
-  late final Animation<double> _taglineOpacity;
-  late final Animation<double> _pulse;
+  late final Animation<double> _contentOpacity;
+  late final Animation<Offset> _contentSlide;
+
+  static const _features = [
+    ('🇳🇵', 'Nepal Curriculum', 'Class 1–10 + SEE'),
+    ('🤖', 'Gemma 4 AI', 'On-device & offline'),
+    ('📷', 'Photo Q&A', 'Snap & solve'),
+  ];
 
   @override
   void initState() {
     super.initState();
 
-    _logoCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _textCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _pulseCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat(reverse: true);
+    _logoCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+    _contentCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
+    _particleCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 8))
+      ..repeat();
 
-    _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
       CurvedAnimation(parent: _logoCtrl, curve: Curves.elasticOut),
     );
     _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoCtrl,
-        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-      ),
+      CurvedAnimation(parent: _logoCtrl, curve: const Interval(0.0, 0.5, curve: Curves.easeOut)),
     );
-    _textOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _textCtrl, curve: Curves.easeOut),
+    _contentOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOut),
     );
-    _textSlide = Tween<Offset>(
-      begin: const Offset(0, 0.3),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(parent: _textCtrl, curve: Curves.easeOutCubic),
-    );
-    _taglineOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _textCtrl,
-        curve: const Interval(0.4, 1.0, curve: Curves.easeOut),
-      ),
-    );
-    _pulse = Tween<double>(begin: 0.85, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    _contentSlide = Tween<Offset>(begin: const Offset(0, 0.25), end: Offset.zero).animate(
+      CurvedAnimation(parent: _contentCtrl, curve: Curves.easeOutCubic),
     );
 
-    _runEntranceAnimation();
+    _start();
   }
 
-  Future<void> _runEntranceAnimation() async {
-    await Future.delayed(const Duration(milliseconds: 100));
+  Future<void> _start() async {
+    await Future.delayed(const Duration(milliseconds: 120));
     _logoCtrl.forward();
-    await Future.delayed(const Duration(milliseconds: 300));
-    _textCtrl.forward();
+    await Future.delayed(const Duration(milliseconds: 400));
+    _contentCtrl.forward();
     _initializeApp();
   }
 
   @override
   void dispose() {
     _logoCtrl.dispose();
-    _textCtrl.dispose();
-    _pulseCtrl.dispose();
+    _contentCtrl.dispose();
+    _particleCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _initializeApp() async {
     try {
-      _setStatus('Checking AI model...');
-
+      _setStatus('Checking AI model...', 0.2);
       final gemma = ref.read(gemmaOfflineProvider);
 
       if (!GemmaOfflineService.platformSupported) {
@@ -114,11 +97,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         return;
       }
 
-      _setStatus('Loading AI model...');
+      _setStatus('Loading Gemma 4...', 0.55);
       final success = await gemma.initialize(skipWarmup: true);
 
       if (success) {
-        _setStatus('AI Ready!');
+        _setStatus('Ready!', 1.0);
+        await Future.delayed(const Duration(milliseconds: 350));
         _navigateToMain();
       } else {
         _goToDownload();
@@ -128,222 +112,298 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     }
   }
 
-  void _setStatus(String s) {
-    if (mounted) setState(() => _status = s);
+  void _setStatus(String s, double p) {
+    if (mounted) setState(() { _status = s; _progress = p; });
   }
 
   void _navigateToMain() {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      slideFromRight(const GradeSelectionScreen()),
-    );
+    final settings = ref.read(appSettingsProvider);
+    if (!settings.isOnboardingDone) {
+      Navigator.of(context).pushReplacement(slideFromRight(const OnboardingScreen()));
+    } else {
+      Navigator.of(context).pushReplacement(slideFromRight(const GradeSelectionScreen()));
+    }
   }
 
   void _goToDownload() {
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      slideFromRight(const ModelDownloadScreen()),
-    );
+    Navigator.of(context).pushReplacement(slideFromRight(const ModelDownloadScreen()));
   }
 
   void _retry() {
-    setState(() => _error = null);
+    setState(() { _error = null; _progress = 0; });
     _initializeApp();
   }
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: GyaanAiColors.gradientHero),
-        child: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Spacer(flex: 2),
-
-                  // Animated logo
-                  AnimatedBuilder(
-                    animation: Listenable.merge([_logoCtrl, _pulseCtrl]),
-                    builder: (context, _) => Opacity(
-                      opacity: _logoOpacity.value,
-                      child: Transform.scale(
-                        scale: _logoScale.value * _pulse.value,
-                        child: Container(
-                          width: 110,
-                          height: 110,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.35),
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.2),
-                                blurRadius: 30,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
-                          child: const Center(
-                            child: Text(
-                              '📚',
-                              style: TextStyle(fontSize: 52),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-
-                  // Brand name + tagline
-                  AnimatedBuilder(
-                    animation: _textCtrl,
-                    builder: (context, _) => FadeTransition(
-                      opacity: _textOpacity,
-                      child: SlideTransition(
-                        position: _textSlide,
-                        child: Column(
-                          children: [
-                            Text(
-                              'GyaanAI',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .displaySmall
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.2,
-                                  ),
-                            ),
-                            const SizedBox(height: 8),
-                            FadeTransition(
-                              opacity: _taglineOpacity,
-                              child: Column(
-                                children: [
-                                  Text(
-                                    'Your Offline AI Tutor',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.85),
-                                          fontWeight: FontWeight.w500,
-                                          letterSpacing: 0.5,
-                                        ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'तपाईंको AI शिक्षक',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.65),
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const Spacer(flex: 2),
-
-                  // Status / error
-                  if (_error != null)
-                    _ErrorCard(error: _error!, onRetry: _retry)
-                  else
-                    _LoadingStatus(status: _status),
-
-                  const SizedBox(height: 48),
-
-                  // Built with Gemma badge
-                  AnimatedBuilder(
-                    animation: _textCtrl,
-                    builder: (context, _) => FadeTransition(
-                      opacity: _taglineOpacity,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.2),
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '⚡',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Powered by Gemma • On-Device AI',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.8),
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.3,
-                                  ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 32),
-                ],
+      body: Stack(
+        children: [
+          // Deep gradient background
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF0A2E14), Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
           ),
+
+          // Animated floating particles
+          AnimatedBuilder(
+            animation: _particleCtrl,
+            builder: (_, __) => CustomPaint(
+              size: size,
+              painter: _ParticlePainter(_particleCtrl.value),
+            ),
+          ),
+
+          // Main content
+          SafeArea(
+            child: Column(
+              children: [
+                const Spacer(flex: 3),
+
+                // Logo + brand
+                AnimatedBuilder(
+                  animation: _logoCtrl,
+                  builder: (_, __) => Opacity(
+                    opacity: _logoOpacity.value,
+                    child: Transform.scale(
+                      scale: _logoScale.value,
+                      child: Column(
+                        children: [
+                          // Logo ring
+                          Container(
+                            width: 120,
+                            height: 120,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF43A047), Color(0xFF1B5E20)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.3),
+                                width: 2.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF43A047).withValues(alpha: 0.5),
+                                  blurRadius: 40,
+                                  spreadRadius: 8,
+                                ),
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.3),
+                                  blurRadius: 24,
+                                  offset: const Offset(0, 12),
+                                ),
+                              ],
+                            ),
+                            child: const Center(
+                              child: Text('📚', style: TextStyle(fontSize: 56)),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          // Brand name
+                          Text(
+                            'GyaanAI',
+                            style: TextStyle(
+                              fontSize: 42,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              letterSpacing: 1.5,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.3),
+                                  blurRadius: 12,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'ज्ञान — Your AI Tutor',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.white.withValues(alpha: 0.8),
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                const Spacer(flex: 2),
+
+                // Feature pills
+                FadeTransition(
+                  opacity: _contentOpacity,
+                  child: SlideTransition(
+                    position: _contentSlide,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: _features.map((f) => _FeaturePill(
+                          emoji: f.$1,
+                          title: f.$2,
+                          subtitle: f.$3,
+                        )).toList(),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const Spacer(flex: 2),
+
+                // Status / error
+                FadeTransition(
+                  opacity: _contentOpacity,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: _error != null
+                        ? _ErrorCard(error: _error!, onRetry: _retry)
+                        : _StatusBar(status: _status, progress: _progress),
+                  ),
+                ),
+
+                const SizedBox(height: 32),
+
+                // Bottom badge
+                FadeTransition(
+                  opacity: _contentOpacity,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('⚡', style: TextStyle(fontSize: 12)),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Powered by Gemma 4 • Google DeepMind',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FeaturePill extends StatelessWidget {
+  const _FeaturePill({required this.emoji, required this.title, required this.subtitle});
+  final String emoji;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+        ),
+        child: Column(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 26)),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: 9.5,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _LoadingStatus extends StatelessWidget {
-  const _LoadingStatus({required this.status});
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.status, required this.progress});
   final String status;
+  final double progress;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.5,
-            color: Colors.white.withValues(alpha: 0.8),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          status,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.75),
+        Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              status,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: progress,
+            minHeight: 3,
+            backgroundColor: Colors.white.withValues(alpha: 0.15),
+            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+          ),
         ),
       ],
     );
@@ -358,49 +418,66 @@ class _ErrorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [
-          const Icon(Icons.error_outline_rounded,
-              color: Colors.white, size: 28),
-          const SizedBox(height: 8),
-          Text(
+          const Icon(Icons.error_outline_rounded, color: Colors.white, size: 32),
+          const SizedBox(height: 10),
+          const Text(
             'Could not initialize',
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             error,
             textAlign: TextAlign.center,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.7),
-                ),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12),
           ),
-          const SizedBox(height: 14),
-          OutlinedButton(
+          const SizedBox(height: 16),
+          ElevatedButton(
             onPressed: onRetry,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white),
-              minimumSize: const Size(120, 40),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: GyaanAiColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: const Text('Retry'),
+            child: const Text('Retry', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
   }
+}
+
+/// Floating soft circles in the background for depth.
+class _ParticlePainter extends CustomPainter {
+  _ParticlePainter(this.t);
+  final double t;
+
+  static final _rng = math.Random(42);
+  static final _dots = List.generate(18, (_) => _rng.nextDouble());
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+    for (var i = 0; i < _dots.length; i += 3) {
+      final phase = (_dots[i] + t * 0.3) % 1.0;
+      final x = _dots[i + 1 < _dots.length ? i + 1 : i] * size.width;
+      final y = ((_dots[i + 2 < _dots.length ? i + 2 : i] + phase * 0.15) % 1.0) * size.height;
+      final r = 4.0 + (_dots[i] * 20);
+      paint.color = Colors.white.withValues(alpha: 0.03 + _dots[i] * 0.04);
+      canvas.drawCircle(Offset(x, y), r, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ParticlePainter old) => old.t != t;
 }
