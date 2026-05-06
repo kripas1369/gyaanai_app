@@ -4,10 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/services/app_settings_service.dart';
+import '../constants/app_assets.dart';
 import '../navigation/slide_route.dart';
 import '../providers/gyaan_ai_providers.dart';
-import '../theme/gyaan_ai_theme.dart';
 import 'grade_selection_screen.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
@@ -168,8 +167,16 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen>
                                     ),
                                   ],
                                 ),
-                                child: const Center(
-                                  child: Text('📚', style: TextStyle(fontSize: 42)),
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(10),
+                                    child: ClipOval(
+                                      child: Image.asset(
+                                        AppAssets.logo,
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 16),

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../constants/app_assets.dart';
 import '../navigation/slide_route.dart';
 import '../providers/gyaan_ai_providers.dart';
 import '../services/gemma_offline_service.dart';
@@ -206,8 +207,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                                 ),
                               ],
                             ),
-                            child: const Center(
-                              child: Text('📚', style: TextStyle(fontSize: 56)),
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: ClipOval(
+                                  child: Image.asset(
+                                    AppAssets.logo,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                           const SizedBox(height: 24),

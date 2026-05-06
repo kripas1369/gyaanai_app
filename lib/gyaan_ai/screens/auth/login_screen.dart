@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../data/services/api_service.dart';
+import '../../constants/app_assets.dart';
 import '../../navigation/slide_route.dart';
 import '../../providers/gyaan_ai_providers.dart';
 import '../../theme/gyaan_ai_theme.dart';
 import '../grade_selection_screen.dart';
-import '../gyaan_ai_settings_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -99,10 +99,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         color: GyaanAiColors.secondary.withValues(alpha: 0.4),
                       ),
                     ),
-                    child: const Icon(
-                      Icons.menu_book_rounded,
-                      size: 40,
-                      color: GyaanAiColors.primary,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: ClipOval(
+                          child: Image.asset(
+                            AppAssets.logo,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -250,16 +256,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: _isLoading
-                      ? null
-                      : () => Navigator.of(context).push(
-                            slideFromRight(const GyaanAiSettingsScreen()),
-                          ),
-                  icon: const Icon(Icons.dns_outlined, size: 18),
-                  label: const Text('Server settings'),
                 ),
                 const SizedBox(height: 8),
               ],

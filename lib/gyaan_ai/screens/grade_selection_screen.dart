@@ -5,15 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../data/services/app_settings_service.dart';
 import '../data/subject_catalog.dart';
 import '../navigation/slide_route.dart';
 import '../providers/gyaan_ai_providers.dart';
 import '../theme/gyaan_ai_theme.dart';
-import '../widgets/gyaan_ai_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
 import 'chat_history_screen.dart';
-import 'local_model_test_screen.dart';
 import 'subject_selection_screen.dart';
 
 class GradeSelectionScreen extends ConsumerStatefulWidget {
@@ -99,16 +96,6 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen>
     return ScaffoldWithBanner(
       appBar: AppBar(
         title: const Text('GyaanAI'),
-        actions: [
-          const GyaanAiAccountMenuButton(),
-          IconButton(
-            tooltip: 'Model test',
-            icon: const Icon(Icons.memory_rounded),
-            onPressed: () => Navigator.of(context).push<void>(
-              MaterialPageRoute<void>(builder: (_) => const LocalModelTestScreen()),
-            ),
-          ),
-        ],
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -151,22 +138,40 @@ class _GradeSelectionScreenState extends ConsumerState<GradeSelectionScreen>
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GridView.count(
-                crossAxisCount: 4,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 0.78,
-                children: [
-                  for (var g = 4; g <= 7; g++) _GradeTile(
-                    grade: g,
-                    style: _styleForGrade(g),
-                    isHighlighted: _highlightGrade == g,
-                    nepaliDigit: _nepaliDigit(g),
-                    onTap: () => _onGradeTap(g),
-                  ),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final w = constraints.maxWidth;
+                  final crossAxisCount = w >= 520
+                      ? 4
+                      : w >= 380
+                          ? 3
+                          : 2;
+
+                  // More height on smaller widths to avoid RenderFlex overflow.
+                  final childAspectRatio = switch (crossAxisCount) { 4 => 0.72, 3 => 0.82, _ => 0.92 };
+
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      childAspectRatio: childAspectRatio,
+                    ),
+                    itemCount: 4,
+                    itemBuilder: (context, index) {
+                      final g = 4 + index;
+                      return _GradeTile(
+                        grade: g,
+                        style: _styleForGrade(g),
+                        isHighlighted: _highlightGrade == g,
+                        nepaliDigit: _nepaliDigit(g),
+                        onTap: () => _onGradeTap(g),
+                      );
+                    },
+                  );
+                },
               ),
             ),
             const SizedBox(height: 20),

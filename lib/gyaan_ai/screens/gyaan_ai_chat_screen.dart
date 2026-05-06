@@ -18,7 +18,6 @@ import '../services/hybrid_ai_service.dart'; // exports ChatHistoryMessage
 import '../services/gyaan_ai_system_prompt.dart';
 import '../services/translation_service.dart';
 import '../theme/gyaan_ai_theme.dart';
-import '../widgets/gyaan_ai_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
 
 class GyaanAiChatScreen extends ConsumerStatefulWidget {
@@ -280,6 +279,16 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
     );
 
     final imagePath = imageToSend?.path;
+    // Read image bytes BEFORE we null out _pendingImage in setState below.
+    // Gemma 4 E2B is multimodal — these bytes go straight into Message.withImage.
+    Uint8List? imageBytes;
+    if (imageToSend != null) {
+      try {
+        imageBytes = await imageToSend.readAsBytes();
+      } catch (e) {
+        debugPrint('ChatScreen: Failed to read image bytes: $e');
+      }
+    }
     // Reset auto-continue counter only when user sends a brand-new question
     final isContinuation = text.trim().toLowerCase() == 'continue';
     if (!isContinuation) _autoContinueCount = 0;
@@ -336,6 +345,7 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
         systemPrompt: system,
         sessionId: widget.sessionId,
         history: history,
+        imageBytes: imageBytes,
       )) {
         if (_stopRequested) break;
 
@@ -425,6 +435,13 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
           _stopRequested = false;
           _showSalute = !_lastResponseTruncated;
         });
+
+        // Stop ⇒ KV cache holds a half-finished assistant turn. If we leave it,
+        // the next user message takes the fast path and the model continues
+        // the abandoned reply instead of answering the new question.
+        if (wasStopped) {
+          ref.read(gemmaOfflineProvider).abortGeneration(widget.sessionId);
+        }
 
         // Auto-continue if truncated and user did not manually stop
         if (_lastResponseTruncated && !wasStopped && _autoContinueCount < _maxAutoContinues) {
@@ -992,26 +1009,94 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
                     color: GyaanAiColors.textSecondary,
                   ),
             ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: GyaanAiColors.secondary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.camera_alt_rounded, size: 14, color: GyaanAiColors.secondary),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Tap 📷 to photograph a question',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: GyaanAiColors.secondary,
-                          fontWeight: FontWeight.w600,
-                        ),
+            const SizedBox(height: 16),
+            // Multimodal hero card — surfaces the Gemma 4 vision capability.
+            // This is the Snap-&-Solve moneyshot for the demo; do not remove
+            // without updating the empty-state narrative.
+            GestureDetector(
+              onTap: () => _pickImage(ImageSource.camera),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      GyaanAiColors.primary.withValues(alpha: 0.08),
+                      GyaanAiColors.secondary.withValues(alpha: 0.12),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                ],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: GyaanAiColors.secondary.withValues(alpha: 0.35),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        gradient: GyaanAiColors.gradientPrimary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'Snap & Solve',
+                                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: GyaanAiColors.primary,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: GyaanAiColors.accent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'NEW',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Photograph a textbook problem — works fully offline',
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: GyaanAiColors.textSecondary,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 14,
+                      color: GyaanAiColors.secondary.withValues(alpha: 0.6),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -1206,7 +1291,6 @@ class _GyaanAiChatScreenState extends ConsumerState<GyaanAiChatScreen> {
                   : null,
             ),
           ),
-          const GyaanAiAccountMenuButton(),
           PopupMenuButton<String>(
             onSelected: (v) async {
               switch (v) {

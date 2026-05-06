@@ -176,6 +176,7 @@ class HybridAiService {
     bool preferOffline = false,
     int? sessionId,
     List<ChatHistoryMessage>? history,
+    Uint8List? imageBytes,
   }) async {
     String? last;
     await for (final acc in runInferenceStreaming(
@@ -186,6 +187,7 @@ class HybridAiService {
       preferOffline: preferOffline,
       sessionId: sessionId,
       history: history,
+      imageBytes: imageBytes,
     )) {
       last = acc;
     }
@@ -194,6 +196,9 @@ class HybridAiService {
 
   /// Stream inference — yields accumulated response as tokens arrive.
   /// Now supports session tracking and conversation history for context-aware responses.
+  ///
+  /// When [imageBytes] is non-null we always run offline — only the local
+  /// Gemma 4 model is multimodal; the Django/Ollama path is text-only.
   Stream<String> runInferenceStreaming({
     required int grade,
     required String subjectEnglish,
@@ -202,8 +207,24 @@ class HybridAiService {
     bool preferOffline = false,
     int? sessionId,
     List<ChatHistoryMessage>? history,
+    Uint8List? imageBytes,
   }) async* {
     final now = DateTime.now();
+
+    // Multimodal: only offline Gemma 4 supports vision; Django/Ollama is text-only.
+    // Force the offline path so the image actually reaches a vision-capable model.
+    if (imageBytes != null) {
+      yield* _runOfflineInference(
+        grade: grade,
+        subjectEnglish: subjectEnglish,
+        userMessage: userMessage,
+        systemPrompt: systemPrompt,
+        sessionId: sessionId,
+        history: history,
+        imageBytes: imageBytes,
+      );
+      return;
+    }
 
     // If user asked to prefer offline, do it deterministically.
     if (preferOffline) {
@@ -290,6 +311,7 @@ class HybridAiService {
     String? systemPrompt,
     int? sessionId,
     List<ChatHistoryMessage>? history,
+    Uint8List? imageBytes,
   }) async* {
     if (!gemmaService.isReady) {
       final initialized = await gemmaService.initialize();
@@ -306,6 +328,7 @@ class HybridAiService {
       systemPrompt: systemPrompt,
       sessionId: sessionId,
       history: history,
+      imageBytes: imageBytes,
     );
   }
 

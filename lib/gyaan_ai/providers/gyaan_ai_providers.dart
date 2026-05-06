@@ -43,7 +43,7 @@ final modelLoaderProvider = Provider<ModelLoaderService>((ref) {
 
 /// Gemma offline inference service.
 final gemmaOfflineProvider = Provider<GemmaOfflineService>((ref) {
-  final s = GemmaOfflineService();
+  final s = GemmaOfflineService(prefs: ref.watch(sharedPrefsProvider));
   ref.onDispose(s.dispose);
   return s;
 });

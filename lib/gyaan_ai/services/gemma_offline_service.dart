@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'conversation_memory_manager.dart';
 import 'gyaan_ai_system_prompt.dart';
@@ -430,11 +431,41 @@ class GemmaOfflineService {
   /// Prefill timeout - if model takes too long to start generating, abort.
   static const Duration _prefillTimeout = Duration(seconds: 30);
 
+  GemmaOfflineService({SharedPreferences? prefs}) : _prefs = prefs {
+    _loadPersistedBackend();
+  }
+
+  /// Persists the last working backend so we don't retry a broken one
+  /// (e.g. status 13 on certain Adreno GPUs) on every cold start.
+  final SharedPreferences? _prefs;
+
+  static const String _kLastBackendPrefKey = 'gemma_litert_last_backend';
+
   InferenceModel? _model;
   var _status = GemmaModelStatus.notFound;
   String? _lastError;
   String? _modelPath;
   PreferredBackend? _lastBackendUsed;
+
+  void _loadPersistedBackend() {
+    final saved = _prefs?.getString(_kLastBackendPrefKey);
+    if (saved == null || saved.isEmpty) return;
+    for (final b in PreferredBackend.values) {
+      if (b.toString() == saved || b.name == saved) {
+        _lastBackendUsed = b;
+        debugPrint('GemmaService: Restored persisted backend: $b');
+        return;
+      }
+    }
+  }
+
+  Future<void> _persistBackend(PreferredBackend backend) async {
+    try {
+      await _prefs?.setString(_kLastBackendPrefKey, backend.name);
+    } catch (e) {
+      debugPrint('GemmaService: Failed to persist backend: $e');
+    }
+  }
 
   /// Mutex to prevent concurrent inference calls (like Google Gallery pattern).
   /// Uses Completer-based lock since Dart doesn't have native mutex.
@@ -550,7 +581,7 @@ class GemmaOfflineService {
         topK: _defaultTopK,
         temperature: _defaultTemperature,
         isThinking: false,
-        modelType: ModelType.gemmaIt,
+        modelType: ModelType.gemma4,
       );
 
       final session = _ConversationSession(
@@ -621,6 +652,38 @@ class GemmaOfflineService {
     debugPrint('GemmaService: Isolated session $keepSessionId');
   }
 
+  /// Drop the fast-path KV-cache flag for [sessionId] (and trim its trailing
+  /// turn, so the next prompt rebuild doesn't include a half-finished reply).
+  ///
+  /// Use this any time generation ended in an unstable state — user-pressed
+  /// Stop, timeout, or stall — where the native KV cache holds a partial
+  /// assistant turn that doesn't match what we persisted. Without this, the
+  /// next user message takes the fast path with the broken cache and the
+  /// model "continues" the dropped reply instead of answering the new question.
+  void _markIncompleteGeneration(int? sessionId) {
+    if (sessionId == null) return;
+    if (_memoryManagerInitialized) {
+      _memoryManager.invalidateKvCache(sessionId);
+    }
+    final session = _sessions[sessionId];
+    if (session != null) {
+      // Drop the trailing partial assistant turn from working memory so the
+      // rebuilt prompt doesn't show the model its own half-sentence.
+      if (session.history.isNotEmpty &&
+          session.history.last.role == 'assistant') {
+        session.history.removeLast();
+      }
+    }
+  }
+
+  /// Public entry point for the UI to signal that a generation was aborted.
+  /// Calls [clearSession] which closes the native chat and forces a fresh
+  /// KV cache on the next turn.
+  void abortGeneration(int sessionId) {
+    debugPrint('GemmaService: Aborting session $sessionId — clearing for fresh context');
+    clearSession(sessionId);
+  }
+
   /// Force invalidate a session if grade/subject changed.
   void invalidateSessionIfMismatch(int sessionId, int grade, String subject) {
     final session = _sessions[sessionId];
@@ -673,39 +736,55 @@ class GemmaOfflineService {
     _model = null;
   }
 
-  /// Detect device RAM and set adaptive token/context limits.
-  /// Pattern from Google AI Edge Gallery: use minDeviceMemoryInGb thresholds.
+  /// Read total device RAM. On Android we parse `/proc/meminfo`'s `MemTotal`
+  /// (no plugin / permission required); on iOS we estimate from
+  /// `ProcessInfo.maxRss` (iOS hardware is fairly uniform per generation, so
+  /// the app-memory headroom is a reasonable proxy).
   ///
-  /// NOTE: ProcessInfo.maxRss returns app memory limit, NOT device RAM.
-  /// Since we can't reliably detect device RAM without a plugin, we use
-  /// platform-based heuristics. Most modern Android devices (2020+) have 4GB+.
-  Future<void> _detectDeviceRamAndSetLimits() async {
+  /// Returns RAM in GB, or null if the source is unavailable / unparseable.
+  static Future<double?> _readDeviceTotalRamGb() async {
     try {
-      // ProcessInfo gives us app memory, not device RAM
-      // Use it as a hint: if app is allowed >1GB, device likely has 4GB+
-      final maxRss = ProcessInfo.maxRss;
-      final maxRssGb = maxRss > 0 ? maxRss / (1024 * 1024 * 1024) : 0.0;
-
-      // Heuristic: Android gives apps roughly 25-50% of device RAM
-      // If maxRss > 1GB, device likely has 4GB+ RAM
-      // If maxRss > 512MB, device likely has 3GB+ RAM
-      if (maxRssGb >= 1.0) {
-        _deviceRamGb = 6.0; // Assume high-RAM device
-      } else if (maxRssGb >= 0.5) {
-        _deviceRamGb = 4.0; // Assume mid-RAM device
-      } else if (maxRssGb > 0) {
-        _deviceRamGb = 3.0; // Conservative estimate
-      } else {
-        // If we can't detect, assume modern device with decent RAM
-        // Most devices running this app (2020+) have at least 4GB
-        _deviceRamGb = 4.0;
+      if (Platform.isAndroid) {
+        final lines = await File('/proc/meminfo').readAsLines();
+        for (final line in lines) {
+          if (line.startsWith('MemTotal:')) {
+            // Format: "MemTotal:       8123456 kB"
+            final match = RegExp(r'(\d+)').firstMatch(line);
+            if (match != null) {
+              final kb = int.parse(match.group(1)!);
+              return kb / (1024 * 1024); // kB → GB
+            }
+          }
+        }
+        return null;
       }
+      if (Platform.isIOS) {
+        final maxRss = ProcessInfo.maxRss;
+        if (maxRss <= 0) return null;
+        // iOS lets apps use roughly 30-50% of device RAM, so multiply.
+        final estGb = (maxRss / (1024 * 1024 * 1024)) * 3.0;
+        return estGb;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
 
-      debugPrint('GemmaService: RAM heuristic: ~${_deviceRamGb.toStringAsFixed(1)}GB (app maxRss=${maxRssGb.toStringAsFixed(2)}GB)');
-    } catch (e) {
-      // Default to standard settings for modern devices
-      _deviceRamGb = 4.0;
-      debugPrint('GemmaService: RAM detection failed, assuming 4GB modern device: $e');
+  /// Detect device RAM and set adaptive token/context limits.
+  /// Replaces the previous `ProcessInfo.maxRss × multiplier` heuristic with
+  /// a direct read from the OS — accurate for low-end Android devices where
+  /// the heuristic incorrectly upgraded users to high-RAM settings and then
+  /// hit OOM / LiteRT status 13.
+  Future<void> _detectDeviceRamAndSetLimits() async {
+    final detected = await _readDeviceTotalRamGb();
+    if (detected != null && detected >= 1.0) {
+      _deviceRamGb = detected;
+      debugPrint('GemmaService: Detected ${_deviceRamGb.toStringAsFixed(1)}GB device RAM');
+    } else {
+      // Conservative default — low-RAM settings are safer than high-RAM.
+      _deviceRamGb = 3.0;
+      debugPrint('GemmaService: RAM detection failed; defaulting to 3GB (low-RAM path)');
     }
 
     // Set adaptive limits based on estimated RAM
@@ -774,7 +853,7 @@ class GemmaOfflineService {
       await FlutterGemma.initialize();
 
       await FlutterGemma.installModel(
-        modelType: ModelType.gemmaIt,
+        modelType: ModelType.gemma4,
       ).fromFile(path).install();
 
       final backends = _liteRtBackendsToTry(
@@ -790,6 +869,10 @@ class GemmaOfflineService {
           _model = await FlutterGemma.getActiveModel(
             maxTokens: _effectiveMaxTokens,
             preferredBackend: backend,
+            // Gemma 4 E2B is natively multimodal — enable so students can
+            // snap a math problem from a textbook and have the model solve it.
+            supportImage: true,
+            maxNumImages: 1,
           );
 
           // SKIP warmup on low-RAM devices to save memory and prevent OOM
@@ -815,6 +898,7 @@ class GemmaOfflineService {
           }
 
           _lastBackendUsed = backend;
+          unawaited(_persistBackend(backend));
           _status = GemmaModelStatus.ready;
           _statusController.add(_status);
           return true;
@@ -859,6 +943,7 @@ class GemmaOfflineService {
     String? systemPrompt,
     int? sessionId,
     List<ChatHistoryMessage>? history,
+    Uint8List? imageBytes,
   }) async {
     String? last;
     await for (final acc in runInferenceAccumulating(
@@ -868,6 +953,7 @@ class GemmaOfflineService {
       systemPrompt: systemPrompt,
       sessionId: sessionId,
       history: history,
+      imageBytes: imageBytes,
     )) {
       last = acc;
     }
@@ -880,6 +966,10 @@ class GemmaOfflineService {
   /// - First message in session: sends full prompt with system context
   /// - Subsequent messages: sends ONLY the new user message (KV cache has history)
   /// - This is 2-3x faster than rebuilding prompt every turn
+  ///
+  /// When [imageBytes] is non-null, sends a multimodal `Message.withImage` and
+  /// always rebuilds full context (the image must be paired with the system
+  /// prompt; the fast KV-reuse path is skipped).
   Stream<String> runInferenceAccumulating({
     required int grade,
     required String subjectEnglish,
@@ -888,6 +978,7 @@ class GemmaOfflineService {
     int? maxOutputTokens,
     int? sessionId,
     List<ChatHistoryMessage>? history,
+    Uint8List? imageBytes,
   }) async* {
     if (_model == null) {
       throw StateError('Model not initialized. Call initialize() first.');
@@ -938,7 +1029,7 @@ class GemmaOfflineService {
               topK: _defaultTopK,
               temperature: _defaultTemperature,
               isThinking: false,
-              modelType: ModelType.gemmaIt,
+              modelType: ModelType.gemma4,
             );
             isFreshChat = true;
           }
@@ -966,7 +1057,12 @@ class GemmaOfflineService {
             final kvCacheValid = _memoryManager.isKvCacheValid(sessionId);
             final sessionMatchesContext = session != null && session.matches(grade, subjectEnglish);
 
-            if (!isFreshChat && hasSessionHistory && !isContinuation && kvCacheValid && sessionMatchesContext) {
+            // An incoming image must always go through the full-context path —
+            // the KV-reuse fast path skips system prompt and image-token prefix,
+            // which corrupts vision encoding.
+            final hasImage = imageBytes != null;
+
+            if (!isFreshChat && hasSessionHistory && !isContinuation && kvCacheValid && sessionMatchesContext && !hasImage) {
               // FAST PATH: KV cache active, just send new message
               // This is 2-3x faster! (Skip prefill of system+history tokens)
               promptToSend = userMessage.trim();
@@ -1017,12 +1113,23 @@ class GemmaOfflineService {
 
           // Add prefill timeout to prevent freezing during model preparation
           try {
-            await chat.addQueryChunk(Message.text(text: promptToSend, isUser: true))
+            final query = imageBytes != null
+                ? Message.withImage(
+                    text: promptToSend,
+                    imageBytes: imageBytes,
+                    isUser: true,
+                  )
+                : Message.text(text: promptToSend, isUser: true);
+            await chat.addQueryChunk(query)
                 .timeout(_prefillTimeout, onTimeout: () {
               throw TimeoutException('Model prefill took too long', _prefillTimeout);
             });
+            if (imageBytes != null) {
+              debugPrint('GemmaService: Image attached (${imageBytes.lengthInBytes} bytes)');
+            }
           } on TimeoutException catch (e) {
             debugPrint('GemmaService: Prefill timeout: $e');
+            _markIncompleteGeneration(sessionId);
             yield 'Response timed out during preparation. Please try again with a shorter message.';
             return;
           }
@@ -1043,6 +1150,9 @@ class GemmaOfflineService {
             // Check for inference timeout
             if (sw.elapsed > _inferenceTimeout) {
               debugPrint('GemmaService: Inference timeout after ${sw.elapsedMilliseconds}ms');
+              // KV cache holds a half-finished assistant turn — the next message
+              // must rebuild context from DB, not fast-path off the partial state.
+              _markIncompleteGeneration(sessionId);
               if (acc.isNotEmpty) {
                 yield '$acc\n\n(Response truncated due to time limit)';
               } else {
@@ -1055,6 +1165,7 @@ class GemmaOfflineService {
             final now = DateTime.now();
             if (now.difference(lastTokenTime) > stallThreshold && tokenCount > 0) {
               debugPrint('GemmaService: Generation stalled after $tokenCount tokens');
+              _markIncompleteGeneration(sessionId);
               if (acc.isNotEmpty) {
                 yield '$acc\n\n(Generation stopped - model stalled)';
               }

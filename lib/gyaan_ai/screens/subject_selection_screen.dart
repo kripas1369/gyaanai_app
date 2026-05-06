@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/subject_catalog.dart';
 import '../navigation/slide_route.dart';
 import '../theme/gyaan_ai_theme.dart';
-import '../widgets/gyaan_ai_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
 import 'chat_history_screen.dart';
 
@@ -94,7 +93,6 @@ class SubjectSelectionScreen extends ConsumerWidget {
             ),
           ],
         ),
-        actions: const [GyaanAiAccountMenuButton()],
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

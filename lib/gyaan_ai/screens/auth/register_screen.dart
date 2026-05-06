@@ -6,7 +6,6 @@ import '../../navigation/slide_route.dart';
 import '../../providers/gyaan_ai_providers.dart';
 import '../../theme/gyaan_ai_theme.dart';
 import '../grade_selection_screen.dart';
-import '../gyaan_ai_settings_screen.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -291,16 +290,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                             ),
                           ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: _isLoading
-                      ? null
-                      : () => Navigator.of(context).push(
-                            slideFromRight(const GyaanAiSettingsScreen()),
-                          ),
-                  icon: const Icon(Icons.dns_outlined, size: 18),
-                  label: const Text('Server settings'),
                 ),
                 const SizedBox(height: 8),
 

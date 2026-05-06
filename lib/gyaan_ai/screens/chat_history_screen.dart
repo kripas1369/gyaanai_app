@@ -7,7 +7,6 @@ import '../data/subject_catalog.dart';
 import '../navigation/slide_route.dart';
 import '../providers/gyaan_ai_providers.dart';
 import '../theme/gyaan_ai_theme.dart';
-import '../widgets/gyaan_ai_account_menu_button.dart';
 import '../widgets/scaffold_with_banner.dart';
 import 'gyaan_ai_chat_screen.dart';
 
@@ -96,6 +95,10 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
   Future<void> _openNewChat() async {
     HapticFeedback.lightImpact();
     final repo = ref.read(gyaanAiChatRepoProvider);
+    // Drop cached gemma sessions so the new chat starts with a fresh KV cache.
+    // Parity with GyaanAiChatScreen._newChat — without this, opening a new
+    // chat from history can pick up KV state from the previous conversation.
+    ref.read(gemmaOfflineProvider).clearAllSessions();
     final id = await repo.createEmptySession(grade: widget.grade, subjectKey: widget.subject.key);
     if (!mounted) return;
     await Navigator.of(context).push(
@@ -246,7 +249,6 @@ class _ChatHistoryScreenState extends ConsumerState<ChatHistoryScreen> {
                 ),
               ],
             ),
-          const GyaanAiAccountMenuButton(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

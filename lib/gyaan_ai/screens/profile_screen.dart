@@ -6,7 +6,6 @@ import '../navigation/slide_route.dart';
 import '../providers/gyaan_ai_providers.dart';
 import '../theme/gyaan_ai_theme.dart';
 import 'auth/login_screen.dart';
-import 'gyaan_ai_settings_screen.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -105,15 +104,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         title: const Text('Profile'),
         backgroundColor: GyaanAiColors.background,
         foregroundColor: GyaanAiColors.primary,
-        actions: [
-          IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).push(
-              slideFromRight(const GyaanAiSettingsScreen()),
-            ),
-          ),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -234,17 +224,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         if (email.isNotEmpty) _tile(Icons.email_outlined, 'Email', email),
         if (grade != null) _tile(Icons.school_outlined, 'Class', '$grade'),
         const SizedBox(height: 32),
-        OutlinedButton.icon(
-          onPressed: () => Navigator.of(context).push(
-            slideFromRight(const GyaanAiSettingsScreen()),
-          ),
-          icon: const Icon(Icons.settings),
-          label: const Text('App settings'),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
-          ),
-        ),
-        const SizedBox(height: 12),
         FilledButton.icon(
           onPressed: _logout,
           icon: const Icon(Icons.logout),
