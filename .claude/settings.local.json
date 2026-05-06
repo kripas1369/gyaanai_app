@@ -23,7 +23,8 @@
       "WebFetch(domain:api.github.com)",
       "Bash(grep -E \"^.*\\\\/$|\\\\.dart$\")",
       "Skill(update-config)",
-      "WebFetch(domain:pub.dev)"
+      "WebFetch(domain:pub.dev)",
+      "Bash(git commit *)"
     ]
   }
 }
